@@ -49,10 +49,17 @@ impl DiscoveryRoot {
 /// by display name.
 #[must_use]
 pub fn discover(roots: impl IntoIterator<Item = DiscoveryRoot>) -> Vec<Skill> {
+    let skills = roots
+        .into_iter()
+        .flat_map(|root| scan_root(&root.path, root.scope));
+    resolve_collisions(skills)
+}
+
+/// Resolve name and directory-id collisions in an arbitrary skill sequence.
+#[must_use]
+pub fn resolve_collisions(skills: impl IntoIterator<Item = Skill>) -> Vec<Skill> {
     let mut by_name = HashMap::new();
-    for root in roots {
-        absorb(&mut by_name, scan_root(&root.path, root.scope));
-    }
+    absorb(&mut by_name, skills);
     let mut skills: Vec<_> = by_name.into_values().collect();
     skills.sort_by(|left, right| left.name.cmp(&right.name));
     skills
@@ -85,7 +92,7 @@ fn scan_root_inner(root: &Path, scope: SkillScope, skills: &mut Vec<Skill>) {
             continue;
         }
         let path = entry.path();
-        if let Some(skill) = load_skill_dir(&path, &dir_name, scope) {
+        if let Some(skill) = load_skill_dir(&path, scope) {
             skills.push(skill);
         } else {
             scan_root_inner(&path, scope, skills);
@@ -93,7 +100,10 @@ fn scan_root_inner(root: &Path, scope: SkillScope, skills: &mut Vec<Skill>) {
     }
 }
 
-fn load_skill_dir(dir: &Path, dir_name: &str, scope: SkillScope) -> Option<Skill> {
+/// Load a bundle rooted at `dir`, if it contains a safe recognized manifest.
+#[must_use]
+pub fn load_skill_dir(dir: &Path, scope: SkillScope) -> Option<Skill> {
+    let dir_name = dir.file_name()?.to_string_lossy();
     let workflow = dir.join(WORKFLOW_MD);
     let skill = dir.join(SKILL_MD);
     let legacy = dir.join(SKILL_JSON);
@@ -104,17 +114,17 @@ fn load_skill_dir(dir: &Path, dir_name: &str, scope: SkillScope) -> Option<Skill
         )
     };
     if is_safe_file(&workflow) {
-        Some(load_document(&workflow, dir, dir_name, scope))
+        Some(load_document(&workflow, dir, &dir_name, scope))
     } else if is_safe_file(&skill) {
-        Some(load_document(&skill, dir, dir_name, scope))
+        Some(load_document(&skill, dir, &dir_name, scope))
     } else if is_safe_file(&legacy) {
-        Some(load_legacy(&legacy, dir, dir_name, scope))
+        Some(load_legacy(&legacy, dir, &dir_name, scope))
     } else {
         None
     }
 }
 
-fn absorb(by_name: &mut HashMap<String, Skill>, incoming: Vec<Skill>) {
+fn absorb(by_name: &mut HashMap<String, Skill>, incoming: impl IntoIterator<Item = Skill>) {
     for mut skill in incoming {
         let collision_keys: Vec<_> = by_name
             .iter()

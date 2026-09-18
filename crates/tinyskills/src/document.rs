@@ -91,26 +91,21 @@ fn walk_files(current: &Path, base: &Path, resources: &mut Vec<PathBuf>) {
     }
 }
 
-pub(crate) fn load_document(
-    document: &Path,
-    dir: &Path,
-    dir_name: &str,
-    scope: SkillScope,
-) -> Skill {
+/// Load one Markdown document into normalized skill metadata.
+#[must_use]
+pub fn load_document(document: &Path, dir: &Path, dir_name: &str, scope: SkillScope) -> Skill {
     let mut warnings = Vec::new();
-    let (frontmatter, body) = match parse_skill(document) {
-        Some((frontmatter, body, parse_warnings)) => {
+    let (frontmatter, body) =
+        if let Some((frontmatter, body, parse_warnings)) = parse_skill(document) {
             warnings.extend(parse_warnings);
             (frontmatter, body)
-        }
-        None => {
+        } else {
             warnings.push(format!(
                 "could not parse {} — exposing directory as placeholder",
                 document.display()
             ));
             (SkillFrontmatter::default(), String::new())
-        }
-    };
+        };
 
     let name = if frontmatter.name.trim().is_empty() {
         warnings.push("frontmatter missing 'name'; using directory name".to_owned());
@@ -199,12 +194,9 @@ pub(crate) fn load_document(
     }
 }
 
-pub(crate) fn load_legacy(
-    manifest_path: &Path,
-    dir: &Path,
-    dir_name: &str,
-    scope: SkillScope,
-) -> Skill {
+/// Load one legacy JSON manifest into normalized skill metadata.
+#[must_use]
+pub fn load_legacy(manifest_path: &Path, dir: &Path, dir_name: &str, scope: SkillScope) -> Skill {
     let mut warnings = vec!["skill uses legacy skill.json; migrate to SKILL.md frontmatter".into()];
     let manifest = std::fs::read_to_string(manifest_path)
         .ok()
