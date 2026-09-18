@@ -22,9 +22,13 @@ crates/tinyskills/
 │   ├── model.rs        # metadata, scopes, constants
 │   ├── document.rs     # Markdown/frontmatter parsing and inventory
 │   ├── discovery.rs    # deterministic scanning and collisions
+│   ├── install.rs      # installation URL and host validation
 │   ├── resource.rs     # safe lookup and resource reads
 │   └── bundle.rs       # compile-time bundle materialization
-└── tests/public_api.rs
+└── tests/
+    ├── edge_cases.rs
+    ├── install.rs
+    └── public_api.rs
 ```
 
 Public exports are centralized in `lib.rs`. Prefer focused modules named for

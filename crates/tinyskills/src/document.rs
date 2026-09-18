@@ -22,7 +22,9 @@ pub fn parse_skill(path: &Path) -> Option<(SkillFrontmatter, String, Vec<String>
 #[must_use]
 pub fn parse_skill_str(content: &str) -> Option<(SkillFrontmatter, String, Vec<String>)> {
     let mut lines = content.lines();
-    let first = lines.next()?;
+    let Some(first) = lines.next() else {
+        return Some((SkillFrontmatter::default(), String::new(), Vec::new()));
+    };
     if first.trim() != "---" {
         return Some((SkillFrontmatter::default(), content.to_owned(), Vec::new()));
     }

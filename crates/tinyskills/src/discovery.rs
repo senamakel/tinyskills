@@ -21,6 +21,7 @@ const EXCLUDED_DIRS: &[&str] = &[
     ".mypy_cache",
     ".ruff_cache",
 ];
+const MAX_DISCOVERY_DEPTH: usize = 64;
 
 /// One directory tree to scan with its host-assigned scope.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,41 +70,40 @@ pub fn resolve_collisions(skills: impl IntoIterator<Item = Skill>) -> Vec<Skill>
 #[must_use]
 pub fn scan_root(root: &Path, scope: SkillScope) -> Vec<Skill> {
     let mut skills = Vec::new();
-    scan_root_inner(root, scope, &mut skills);
-    skills.sort_by(|left, right| left.dir_name.cmp(&right.dir_name));
-    skills
-}
-
-fn scan_root_inner(root: &Path, scope: SkillScope, skills: &mut Vec<Skill>) {
-    let Ok(metadata) = std::fs::symlink_metadata(root) else {
-        return;
-    };
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return;
-    }
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return;
-    };
-    let mut entries: Vec<_> = entries.flatten().collect();
-    entries.sort_by_key(std::fs::DirEntry::file_name);
-    for entry in entries {
-        let Ok(file_type) = entry.file_type() else {
+    let mut stack = vec![(root.to_path_buf(), 0usize)];
+    while let Some((current, depth)) = stack.pop() {
+        let Ok(metadata) = std::fs::symlink_metadata(&current) else {
             continue;
         };
-        if file_type.is_symlink() || !file_type.is_dir() {
+        if !metadata.is_dir() || metadata.file_type().is_symlink() || depth > MAX_DISCOVERY_DEPTH {
             continue;
         }
-        let dir_name = entry.file_name().to_string_lossy().into_owned();
-        if dir_name.starts_with('.') || EXCLUDED_DIRS.contains(&dir_name.as_str()) {
+        let Ok(entries) = std::fs::read_dir(&current) else {
             continue;
-        }
-        let path = entry.path();
-        if let Some(skill) = load_skill_dir(&path, scope) {
-            skills.push(skill);
-        } else {
-            scan_root_inner(&path, scope, skills);
+        };
+        let mut entries: Vec<_> = entries.flatten().collect();
+        entries.sort_by_key(std::fs::DirEntry::file_name);
+        for entry in entries.into_iter().rev() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_symlink() || !file_type.is_dir() {
+                continue;
+            }
+            let dir_name = entry.file_name().to_string_lossy().into_owned();
+            if dir_name.starts_with('.') || EXCLUDED_DIRS.contains(&dir_name.as_str()) {
+                continue;
+            }
+            let path = entry.path();
+            if let Some(skill) = load_skill_dir(&path, scope) {
+                skills.push(skill);
+            } else if depth < MAX_DISCOVERY_DEPTH {
+                stack.push((path, depth + 1));
+            }
         }
     }
+    skills.sort_by(|left, right| left.dir_name.cmp(&right.dir_name));
+    skills
 }
 
 /// Load a bundle rooted at `dir`, if it contains a safe recognized manifest.
@@ -140,20 +140,28 @@ fn absorb(by_name: &mut HashMap<String, Skill>, incoming: impl IntoIterator<Item
         let highest = collision_keys
             .iter()
             .filter_map(|key| by_name.get(key))
-            .max_by_key(|existing| existing.scope.precedence());
-        if let Some(existing) = highest
-            && skill.scope.precedence() < existing.scope.precedence()
-        {
-            if let Some(kept) = by_name.get_mut(&existing.name.clone()) {
-                kept.warnings.push(format!(
-                    "skill id '{}' or name '{}' also declared in {:?} scope at {} (ignored)",
-                    skill.dir_name,
-                    skill.name,
-                    skill.scope,
-                    display_location(&skill)
-                ));
+            .max_by(|left, right| {
+                left.scope
+                    .precedence()
+                    .cmp(&right.scope.precedence())
+                    .then_with(|| location_key(left).cmp(&location_key(right)))
+            });
+        if let Some(existing) = highest {
+            let incoming_wins = skill.scope.precedence() > existing.scope.precedence()
+                || (skill.scope.precedence() == existing.scope.precedence()
+                    && location_key(&skill) < location_key(existing));
+            if !incoming_wins {
+                if let Some(kept) = by_name.get_mut(&existing.name.clone()) {
+                    kept.warnings.push(format!(
+                        "skill id '{}' or name '{}' also declared in {:?} scope at {} (ignored; stable collision winner)",
+                        skill.dir_name,
+                        skill.name,
+                        skill.scope,
+                        display_location(&skill)
+                    ));
+                }
+                continue;
             }
-            continue;
         }
         for key in collision_keys {
             if let Some(shadowed) = by_name.remove(&key) {
@@ -168,6 +176,14 @@ fn absorb(by_name: &mut HashMap<String, Skill>, incoming: impl IntoIterator<Item
         }
         by_name.insert(skill.name.clone(), skill);
     }
+}
+
+fn location_key(skill: &Skill) -> String {
+    skill
+        .location
+        .as_deref()
+        .map(|path| path.to_string_lossy().replace('\\', "/"))
+        .unwrap_or_default()
 }
 
 fn display_location(skill: &Skill) -> String {

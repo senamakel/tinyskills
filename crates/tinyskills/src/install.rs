@@ -157,16 +157,16 @@ pub fn derive_install_slug(frontmatter: &SkillFrontmatter) -> Result<String, Ins
         .get("id")
         .and_then(serde_yaml::Value::as_str)
         .unwrap_or(&frontmatter.name);
-    if candidate.len() > MAX_NAME_LEN.saturating_mul(4) {
-        return Err(InstallError::SlugTooLong { max: MAX_NAME_LEN });
-    }
-    let mut slug = String::with_capacity(candidate.len().min(MAX_NAME_LEN));
+    let mut slug = String::with_capacity(candidate.len().min(MAX_NAME_LEN + 1));
     let mut last_dash = false;
     for character in candidate.chars() {
         if character.is_ascii_alphanumeric() {
+            if slug.len() >= MAX_NAME_LEN {
+                return Err(InstallError::SlugTooLong { max: MAX_NAME_LEN });
+            }
             slug.push(character.to_ascii_lowercase());
             last_dash = false;
-        } else if !last_dash && !slug.is_empty() {
+        } else if !last_dash && !slug.is_empty() && slug.len() < MAX_NAME_LEN {
             slug.push('-');
             last_dash = true;
         }

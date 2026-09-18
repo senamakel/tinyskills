@@ -18,6 +18,7 @@ thiserror.workspace = true
 tracing.workspace = true
 tokio.workspace = true
 url.workspace = true
+rustix.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

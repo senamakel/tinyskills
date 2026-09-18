@@ -1,7 +1,7 @@
 //! Safe lookup and reading of files bundled with a skill.
 
 use crate::model::{MAX_RESOURCE_BYTES, Skill};
-use std::path::Path;
+use std::path::{Component, Path};
 use thiserror::Error;
 
 /// Errors returned while resolving or reading a skill resource.
@@ -132,16 +132,17 @@ pub fn read_resource(skill: &Skill, relative_path: &Path) -> Result<String, Reso
             path: canonical_requested.display().to_string(),
         });
     }
-    let bytes = read_bounded(&canonical_requested, MAX_RESOURCE_BYTES)
+    let file = open_resource(&canonical_root, relative_path)
+        .map_err(|error| io_error("failed to open resource", &canonical_requested, error))?;
+    let bytes = read_bounded_file(file, MAX_RESOURCE_BYTES)
         .map_err(|error| io_error("failed to read resource", &canonical_requested, error))?;
     std::str::from_utf8(&bytes)
         .map(str::to_owned)
         .map_err(ResourceError::InvalidUtf8)
 }
 
-fn read_bounded(path: &Path, limit: u64) -> std::io::Result<Vec<u8>> {
+fn read_bounded_file(file: std::fs::File, limit: u64) -> std::io::Result<Vec<u8>> {
     use std::io::Read;
-    let file = std::fs::File::open(path)?;
     let mut bytes = Vec::new();
     file.take(limit.saturating_add(1)).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > limit {
@@ -153,10 +154,57 @@ fn read_bounded(path: &Path, limit: u64) -> std::io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
+#[cfg(unix)]
+fn open_resource(root: &Path, relative_path: &Path) -> std::io::Result<std::fs::File> {
+    use rustix::fs::{Mode, OFlags, openat};
+    let mut directory = std::fs::File::open(root)?;
+    let mut components = relative_path.components().peekable();
+    while let Some(Component::Normal(component)) = components.next() {
+        let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        if components.peek().is_some() {
+            let fd = openat(
+                &directory,
+                component,
+                flags | OFlags::DIRECTORY,
+                Mode::empty(),
+            )?;
+            directory = std::fs::File::from(fd);
+        } else {
+            let fd = openat(&directory, component, flags, Mode::empty())?;
+            return Ok(std::fs::File::from(fd));
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "resource path has no normal components",
+    ))
+}
+
+#[cfg(not(unix))]
+fn open_resource(root: &Path, relative_path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::File::open(root.join(relative_path))
+}
+
 fn io_error(context: &'static str, path: &Path, source: std::io::Error) -> ResourceError {
     ResourceError::Io {
         context,
         path: path.display().to_string(),
         source,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bounded_reader_rejects_growth() -> Result<(), Box<dyn std::error::Error>> {
+        let temp = tempfile::tempdir()?;
+        let path = temp.path().join("resource");
+        std::fs::write(&path, "too large")?;
+        let file = std::fs::File::open(path)?;
+        assert!(read_bounded_file(file, 3).is_err());
+        assert!(open_resource(temp.path(), Path::new("")).is_err());
+        Ok(())
     }
 }

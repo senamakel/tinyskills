@@ -36,7 +36,10 @@ fn parsing_handles_plain_unterminated_and_invalid_yaml() -> Result<(), Box<dyn s
         parse_skill_str("---\nname: [\n---\nbody\n").ok_or("invalid yaml rejected")?;
     assert!(frontmatter.name.is_empty());
     assert_eq!(warnings.len(), 1);
-    assert!(parse_skill_str("").is_none());
+    let (empty, body, warnings) = parse_skill_str("").ok_or("empty document rejected")?;
+    assert!(empty.name.is_empty());
+    assert!(body.is_empty());
+    assert!(warnings.is_empty());
     Ok(())
 }
 
@@ -152,6 +155,7 @@ fn collision_resolution_handles_lower_and_equal_precedence()
         DiscoveryRoot::new(temp.path().join("other"), SkillScope::User),
     ]);
     assert_eq!(equal.len(), 1);
+    assert_eq!(equal[0].description, "equal");
     Ok(())
 }
 
