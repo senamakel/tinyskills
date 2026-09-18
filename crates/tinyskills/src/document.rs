@@ -238,6 +238,7 @@ pub fn load_legacy(manifest_path: &Path, dir: &Path, dir_name: &str, scope: Skil
         scope,
         legacy: true,
         source_format: "legacy".to_owned(),
+        warnings,
         ..Skill::default()
     }
 }

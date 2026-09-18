@@ -62,12 +62,8 @@ pub fn read_resource(skill: &Skill, relative_path: &Path) -> Result<String, Stri
         .as_deref()
         .and_then(Path::parent)
         .ok_or_else(|| format!("skill '{}' has no on-disk location", skill.name))?;
-    let canonical_root = std::fs::canonicalize(root).map_err(|error| {
-        format!(
-            "failed to canonicalize skill root {}: {error}",
-            root.display()
-        )
-    })?;
+    let canonical_root = std::fs::canonicalize(root)
+        .map_err(|error| io_error("failed to canonicalize skill root", root, &error))?;
     let requested = canonical_root.join(relative_path);
     let metadata = std::fs::symlink_metadata(&requested)
         .map_err(|error| format!("failed to stat resource {}: {error}", requested.display()))?;
@@ -83,25 +79,21 @@ pub fn read_resource(skill: &Skill, relative_path: &Path) -> Result<String, Stri
             metadata.len()
         ));
     }
-    let canonical_requested = std::fs::canonicalize(&requested).map_err(|error| {
-        format!(
-            "failed to canonicalize resource {}: {error}",
-            requested.display()
-        )
-    })?;
+    let canonical_requested = std::fs::canonicalize(&requested)
+        .map_err(|error| io_error("failed to canonicalize resource", &requested, &error))?;
     if !canonical_requested.starts_with(&canonical_root) {
         return Err(format!(
             "resource path escapes skill root: {}",
             canonical_requested.display()
         ));
     }
-    let bytes = std::fs::read(&canonical_requested).map_err(|error| {
-        format!(
-            "failed to read resource {}: {error}",
-            canonical_requested.display()
-        )
-    })?;
+    let bytes = std::fs::read(&canonical_requested)
+        .map_err(|error| io_error("failed to read resource", &canonical_requested, &error))?;
     std::str::from_utf8(&bytes)
         .map(str::to_owned)
         .map_err(|error| format!("resource is not valid UTF-8 text: {error}"))
+}
+
+fn io_error(context: &str, path: &Path, error: &std::io::Error) -> String {
+    format!("{context} {}: {error}", path.display())
 }

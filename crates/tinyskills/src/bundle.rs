@@ -184,7 +184,7 @@ fn install_one(root: &Path, bundle: BundledSkill) -> Result<bool, String> {
 }
 
 fn validate_relative_path(dir_name: &str, path: &str) -> Result<(), String> {
-    if path.is_empty() || path.starts_with(['/', '\\']) || path.contains(':') {
+    if path.is_empty() || path.starts_with(['/', '\\']) || path.contains([':', '\\']) {
         return Err(format!(
             "bundled skill `{dir_name}` file `{path}` is not relative"
         ));
