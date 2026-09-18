@@ -75,6 +75,12 @@ pub fn scan_root(root: &Path, scope: SkillScope) -> Vec<Skill> {
 }
 
 fn scan_root_inner(root: &Path, scope: SkillScope, skills: &mut Vec<Skill>) {
+    let Ok(metadata) = std::fs::symlink_metadata(root) else {
+        return;
+    };
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return;
+    }
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
     };

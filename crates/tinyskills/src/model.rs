@@ -5,21 +5,17 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Current workflow document filename.
-pub const WORKFLOW_MD: &str = "WORKFLOW.md";
-/// Current workflow sidecar filename.
-pub const WORKFLOW_TOML: &str = "workflow.toml";
+pub(crate) const WORKFLOW_MD: &str = "WORKFLOW.md";
 /// Standard agentskills.io document filename.
-pub const SKILL_MD: &str = "SKILL.md";
-/// Legacy skill sidecar filename.
-pub const SKILL_TOML: &str = "skill.toml";
+pub(crate) const SKILL_MD: &str = "SKILL.md";
 /// Legacy JSON manifest filename.
-pub const SKILL_JSON: &str = "skill.json";
+pub(crate) const SKILL_JSON: &str = "skill.json";
 /// Recommended upper bound for a skill name.
-pub const MAX_NAME_LEN: usize = 64;
+pub(crate) const MAX_NAME_LEN: usize = 64;
 /// Recommended upper bound for a skill description.
-pub const MAX_DESCRIPTION_LEN: usize = 1024;
+pub(crate) const MAX_DESCRIPTION_LEN: usize = 1024;
 /// Conventional resource directories discovered inside a skill bundle.
-pub const RESOURCE_DIRS: &[&str] = &[
+pub(crate) const RESOURCE_DIRS: &[&str] = &[
     "scripts",
     "references",
     "assets",
@@ -28,7 +24,11 @@ pub const RESOURCE_DIRS: &[&str] = &[
     "prompts",
 ];
 /// Maximum text resource size accepted by [`crate::read_resource`].
-pub const MAX_RESOURCE_BYTES: u64 = 128 * 1024;
+pub(crate) const MAX_RESOURCE_BYTES: u64 = 128 * 1024;
+/// Maximum Markdown document size accepted by the parser.
+pub(crate) const MAX_DOCUMENT_BYTES: u64 = 1024 * 1024;
+/// Maximum legacy JSON manifest size accepted by the parser.
+pub(crate) const MAX_LEGACY_MANIFEST_BYTES: u64 = 256 * 1024;
 
 /// Origin of a discovered skill, ordered from lowest to highest precedence.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -172,6 +172,9 @@ pub struct Skill {
     /// Non-fatal diagnostics produced while loading.
     #[serde(default)]
     pub warnings: Vec<String>,
+    /// Cached body populated only for documents loaded by discovery.
+    #[serde(skip)]
+    pub body: Option<String>,
 }
 
 impl Skill {
@@ -181,8 +184,7 @@ impl Skill {
         if self.legacy {
             return None;
         }
-        let path = self.location.as_deref()?;
-        crate::parse_skill(path).map(|(_, body, _)| body)
+        self.body.clone()
     }
 }
 

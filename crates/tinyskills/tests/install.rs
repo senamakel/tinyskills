@@ -2,10 +2,9 @@
 
 use std::collections::HashMap;
 
-use tinyskills::SkillFrontmatter;
-use tinyskills::install::{
-    MAX_INSTALL_URL_LEN, derive_install_slug, is_loopback_http_url, is_private_or_local_host,
-    normalize_install_url, validate_install_url, validate_resolved_host,
+use tinyskills::{
+    MAX_INSTALL_URL_LEN, SkillFrontmatter, derive_install_slug, is_loopback_http_url,
+    is_private_or_local_host, normalize_install_url, validate_install_url, validate_resolved_host,
 };
 
 #[test]
@@ -23,10 +22,14 @@ fn normalizes_supported_urls_and_rejects_non_documents() {
         "https://github.com/o/r",
         "https://github.com/o/r/tree/main/path",
         "https://github.com/o/r/raw/main/path",
+        "https://github.com/o/r/blob/main/../SKILL.md",
         "https://example.com/archive.zip",
     ] {
         assert!(normalize_install_url(url).is_err(), "{url}");
     }
+    assert!(
+        normalize_install_url(&("https://example.com/".to_owned() + &"x".repeat(2048))).is_err()
+    );
 }
 
 #[test]
@@ -49,6 +52,13 @@ fn derives_bounded_slugs_from_id_or_name() {
     assert!(
         derive_install_slug(&SkillFrontmatter {
             name: "x".repeat(65),
+            ..SkillFrontmatter::default()
+        })
+        .is_err()
+    );
+    assert!(
+        derive_install_slug(&SkillFrontmatter {
+            name: "x".repeat(257),
             ..SkillFrontmatter::default()
         })
         .is_err()
@@ -77,6 +87,7 @@ fn validates_scheme_length_and_literal_host_safety() {
     assert!(validate_install_url("http://localhost/SKILL.md", false).is_err());
     assert!(validate_install_url("http://localhost/SKILL.md", true).is_ok());
     assert!(validate_install_url("https://127.0.0.1/SKILL.md", false).is_err());
+    assert!(validate_install_url("https://192.0.2.1/SKILL.md", false).is_err());
     assert!(validate_install_url("https://example.com/SKILL.md", false).is_ok());
 }
 
@@ -92,6 +103,7 @@ fn classifies_local_hosts_and_loopback_http_exactly() {
         "169.254.1.1",
         "100.64.0.1",
         "198.51.100.1",
+        "192.0.2.1",
         "[::1]",
         "fd00::1",
         "fe80::1",
@@ -110,8 +122,33 @@ fn classifies_local_hosts_and_loopback_http_exactly() {
     assert!(!is_loopback_http_url("bad"));
 }
 
+#[test]
+fn classifies_reserved_address_families() {
+    for host in [
+        "0.1.2.3",
+        "192.0.0.1",
+        "192.88.99.1",
+        "198.18.0.1",
+        "203.0.113.1",
+        "224.0.0.1",
+        "240.0.0.1",
+        "::",
+        "ff02::1",
+        "2001:db8::1",
+        "fc00::1",
+        "fe80::1",
+        "0100::1",
+        "2001:2::1",
+        "3ff0::1",
+        "5f00::1",
+        "::ffff:192.0.2.1",
+    ] {
+        assert!(is_private_or_local_host(host), "{host}");
+    }
+}
+
 #[tokio::test]
-async fn dns_guard_rejects_invalid_and_loopback_targets() {
+async fn dns_guard_rejects_invalid_targets_without_network_access() {
     assert!(validate_resolved_host("not a url").await.is_err());
     assert!(
         validate_resolved_host("https://127.0.0.1/SKILL.md")
@@ -122,5 +159,10 @@ async fn dns_guard_rejects_invalid_and_loopback_targets() {
         validate_resolved_host("https://[::1]/SKILL.md")
             .await
             .is_err()
+    );
+    assert!(
+        validate_resolved_host("https://8.8.8.8/SKILL.md")
+            .await
+            .is_ok()
     );
 }

@@ -4,12 +4,13 @@ use crate::model::{
     LegacyManifest, MAX_DESCRIPTION_LEN, MAX_NAME_LEN, RESOURCE_DIRS, Skill, SkillFrontmatter,
     SkillScope,
 };
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Parse a skill document from disk.
 #[must_use]
 pub fn parse_skill(path: &Path) -> Option<(SkillFrontmatter, String, Vec<String>)> {
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = read_bounded_text(path, crate::model::MAX_DOCUMENT_BYTES).ok()?;
     parse_skill_str(&content)
 }
 
@@ -62,14 +63,18 @@ pub fn inventory_resources(dir: &Path) -> Vec<PathBuf> {
             continue;
         };
         if metadata.is_dir() && !metadata.file_type().is_symlink() {
-            walk_files(&root, dir, &mut resources);
+            walk_files(&root, dir, &mut resources, 0);
         }
     }
     resources.sort();
     resources
 }
 
-fn walk_files(current: &Path, base: &Path, resources: &mut Vec<PathBuf>) {
+fn walk_files(current: &Path, base: &Path, resources: &mut Vec<PathBuf>, depth: usize) {
+    const MAX_RESOURCE_DEPTH: usize = 64;
+    if depth > MAX_RESOURCE_DEPTH {
+        return;
+    }
     let Ok(entries) = std::fs::read_dir(current) else {
         return;
     };
@@ -82,7 +87,7 @@ fn walk_files(current: &Path, base: &Path, resources: &mut Vec<PathBuf>) {
         }
         let path = entry.path();
         if file_type.is_dir() {
-            walk_files(&path, base, resources);
+            walk_files(&path, base, resources, depth + 1);
         } else if file_type.is_file()
             && let Ok(relative) = path.strip_prefix(base)
         {
@@ -93,7 +98,12 @@ fn walk_files(current: &Path, base: &Path, resources: &mut Vec<PathBuf>) {
 
 /// Load one Markdown document into normalized skill metadata.
 #[must_use]
-pub fn load_document(document: &Path, dir: &Path, dir_name: &str, scope: SkillScope) -> Skill {
+pub(crate) fn load_document(
+    document: &Path,
+    dir: &Path,
+    dir_name: &str,
+    scope: SkillScope,
+) -> Skill {
     let mut warnings = Vec::new();
     let (frontmatter, body) =
         if let Some((frontmatter, body, parse_warnings)) = parse_skill(document) {
@@ -191,14 +201,20 @@ pub fn load_document(document: &Path, dir: &Path, dir_name: &str, scope: SkillSc
         scope,
         legacy: false,
         warnings,
+        body: Some(body),
     }
 }
 
 /// Load one legacy JSON manifest into normalized skill metadata.
 #[must_use]
-pub fn load_legacy(manifest_path: &Path, dir: &Path, dir_name: &str, scope: SkillScope) -> Skill {
+pub(crate) fn load_legacy(
+    manifest_path: &Path,
+    dir: &Path,
+    dir_name: &str,
+    scope: SkillScope,
+) -> Skill {
     let mut warnings = vec!["skill uses legacy skill.json; migrate to SKILL.md frontmatter".into()];
-    let manifest = std::fs::read_to_string(manifest_path)
+    let manifest = read_bounded_text(manifest_path, crate::model::MAX_LEGACY_MANIFEST_BYTES)
         .ok()
         .and_then(|content| serde_json::from_str::<LegacyManifest>(&content).ok())
         .unwrap_or_else(|| {
@@ -241,6 +257,28 @@ pub fn load_legacy(manifest_path: &Path, dir: &Path, dir_name: &str, scope: Skil
         warnings,
         ..Skill::default()
     }
+}
+
+fn read_bounded_text(path: &Path, limit: u64) -> std::io::Result<String> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > limit {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "file is not a bounded regular file",
+        ));
+    }
+    let file = std::fs::File::open(path)?;
+    let mut bytes = Vec::new();
+    file.take(limit.saturating_add(1)).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > limit {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "file grew beyond its limit while reading",
+        ));
+    }
+    String::from_utf8(bytes).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "file is not valid UTF-8")
+    })
 }
 
 fn first_body_line(body: &str) -> Option<String> {

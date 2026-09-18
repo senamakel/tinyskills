@@ -8,6 +8,22 @@ use tinyskills::{
     read_resource, resolve_skill, scan_root,
 };
 
+static DUPLICATE_BUNDLE_FILES: &[BundledFile] = &[
+    BundledFile {
+        path: "SKILL.md",
+        contents: "body",
+    },
+    BundledFile {
+        path: "SKILL.md",
+        contents: "other",
+    },
+];
+
+static MATERIALIZED_FILES: &[BundledFile] = &[BundledFile {
+    path: "SKILL.md",
+    contents: "body",
+}];
+
 #[test]
 fn parsing_handles_plain_unterminated_and_invalid_yaml() -> Result<(), Box<dyn std::error::Error>> {
     let (frontmatter, body, warnings) = parse_skill_str("plain body").ok_or("plain rejected")?;
@@ -208,11 +224,43 @@ fn resource_reads_reject_every_unsafe_shape() -> Result<(), Box<dyn std::error::
         ..Skill::default()
     };
     assert!(read_resource(&missing_root, Path::new("file")).is_err());
+
+    let oversized_document = dir.join("SKILL.md");
+    fs::write(&oversized_document, vec![b'x'; 1024 * 1024 + 1])?;
+    assert!(
+        scan_root(temp.path(), SkillScope::User)[0]
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("could not parse"))
+    );
     Ok(())
 }
 
 #[test]
-fn bundle_validation_and_exactness_reject_unsafe_state() -> Result<(), Box<dyn std::error::Error>> {
+fn bounded_inventory_and_legacy_reads_skip_unsafe_inputs() -> Result<(), Box<dyn std::error::Error>>
+{
+    let temp = tempfile::tempdir()?;
+    let dir = temp.path().join("deep");
+    fs::create_dir_all(&dir)?;
+    fs::write(dir.join("SKILL.md"), "---\nname: deep\n---\nbody\n")?;
+    let mut nested = dir.join("references");
+    for _ in 0..66 {
+        nested = nested.join("x");
+    }
+    fs::create_dir_all(&nested)?;
+    fs::write(nested.join("ignored"), "too deep")?;
+    assert!(tinyskills::inventory_resources(&dir).is_empty());
+
+    let legacy = temp.path().join("legacy");
+    fs::create_dir_all(&legacy)?;
+    fs::write(legacy.join("skill.json"), vec![b'{'; 256 * 1024 + 1])?;
+    let found = tinyskills::scan_root(temp.path(), SkillScope::Legacy);
+    assert!(found.iter().any(|skill| skill.dir_name == "legacy"));
+    Ok(())
+}
+
+#[test]
+fn bundle_validation_and_exactness_reject_unsafe_state() {
     static MANIFEST: &[BundledFile] = &[BundledFile {
         path: "SKILL.md",
         contents: "body",
@@ -221,7 +269,7 @@ fn bundle_validation_and_exactness_reject_unsafe_state() -> Result<(), Box<dyn s
         path: "readme",
         contents: "x",
     }];
-    for name in ["", ".hidden", "a/b", "a\\b"] {
+    for name in ["", ".hidden", "a/b", "a\\b", "drive:name"] {
         assert!(
             BundledSkill {
                 dir_name: name,
@@ -243,6 +291,14 @@ fn bundle_validation_and_exactness_reject_unsafe_state() -> Result<(), Box<dyn s
         BundledSkill {
             dir_name: "demo",
             files: NO_MANIFEST
+        }
+        .validate()
+        .is_err()
+    );
+    assert!(
+        BundledSkill {
+            dir_name: "demo",
+            files: DUPLICATE_BUNDLE_FILES
         }
         .validate()
         .is_err()
@@ -279,33 +335,140 @@ fn bundle_validation_and_exactness_reject_unsafe_state() -> Result<(), Box<dyn s
             .is_err()
         );
     }
+}
 
+#[test]
+fn bundle_materialization_detects_stale_state() -> Result<(), Box<dyn std::error::Error>> {
     let temp = tempfile::tempdir()?;
     let bundle = BundledSkill {
         dir_name: "demo",
-        files: MANIFEST,
+        files: MATERIALIZED_FILES,
     };
-    let first = tinyskills::bundle::install(temp.path(), &[bundle]);
+    let first = tinyskills::install(temp.path(), &[bundle]);
     assert_eq!(first.written, ["demo"]);
-    let unchanged = tinyskills::bundle::install(temp.path(), &[bundle]);
+    let unchanged = tinyskills::install(temp.path(), &[bundle]);
     assert_eq!(unchanged.unchanged, ["demo"]);
     fs::write(temp.path().join("demo/extra"), "x")?;
-    assert!(!tinyskills::bundle::is_current_materialization(
+    assert!(!tinyskills::is_current_materialization(
         &temp.path().join("demo"),
         bundle
     ));
-    assert!(!tinyskills::bundle::is_current_materialization(
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink("SKILL.md", temp.path().join("demo/link"))?;
+        assert!(!tinyskills::is_current_materialization(
+            &temp.path().join("demo"),
+            bundle
+        ));
+    }
+    assert!(!tinyskills::is_current_materialization(
         &temp.path().join("missing"),
         bundle
     ));
-    let failed = tinyskills::bundle::install(
+    fs::remove_file(temp.path().join("demo/SKILL.md"))?;
+    assert!(!tinyskills::is_current_materialization(
+        &temp.path().join("demo"),
+        bundle
+    ));
+    fs::write(temp.path().join("demo/SKILL.md"), "tampered")?;
+    assert!(!tinyskills::is_current_materialization(
+        &temp.path().join("demo"),
+        bundle
+    ));
+    let failed = tinyskills::install(
         temp.path(),
         &[BundledSkill {
             dir_name: "bad/name",
-            files: MANIFEST,
+            files: MATERIALIZED_FILES,
         }],
     );
     assert_eq!(failed.failed.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn bundle_materialization_handles_nested_files_and_existing_links()
+-> Result<(), Box<dyn std::error::Error>> {
+    static NESTED: &[BundledFile] = &[
+        BundledFile {
+            path: "SKILL.md",
+            contents: "body",
+        },
+        BundledFile {
+            path: "references/guide.md",
+            contents: "guide",
+        },
+    ];
+    let temp = tempfile::tempdir()?;
+    let bundle = BundledSkill {
+        dir_name: "demo",
+        files: NESTED,
+    };
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink("outside", temp.path().join("demo"))?;
+    }
+    let report = tinyskills::install(temp.path(), &[bundle]);
+    assert_eq!(report.written, ["demo"]);
+    assert_eq!(
+        tinyskills::install(temp.path(), &[bundle]).unchanged,
+        ["demo"]
+    );
+    assert!(temp.path().join("demo/references/guide.md").is_file());
+    Ok(())
+}
+
+#[test]
+fn materialization_rejects_invalid_and_symlinked_expected_files()
+-> Result<(), Box<dyn std::error::Error>> {
+    let temp = tempfile::tempdir()?;
+    let invalid = BundledSkill {
+        dir_name: "demo",
+        files: &[BundledFile {
+            path: "unsafe/../SKILL.md",
+            contents: "body",
+        }],
+    };
+    assert!(!tinyskills::is_current_materialization(
+        temp.path(),
+        invalid
+    ));
+    let bundle = BundledSkill {
+        dir_name: "demo",
+        files: MATERIALIZED_FILES,
+    };
+    fs::create_dir(temp.path().join("demo"))?;
+    #[cfg(unix)]
+    std::os::unix::fs::symlink("outside", temp.path().join("demo/SKILL.md"))?;
+    #[cfg(unix)]
+    assert!(!tinyskills::is_current_materialization(
+        &temp.path().join("demo"),
+        bundle
+    ));
+    Ok(())
+}
+
+#[test]
+fn bundle_hardening_rejects_invalid_roots() -> Result<(), Box<dyn std::error::Error>> {
+    let temp = tempfile::tempdir()?;
+    let root_file = temp.path().join("not-a-directory");
+    fs::write(&root_file, "x")?;
+    let bundle = BundledSkill {
+        dir_name: "demo",
+        files: &[BundledFile {
+            path: "SKILL.md",
+            contents: "body",
+        }],
+    };
+    assert_eq!(tinyskills::install(&root_file, &[bundle]).failed.len(), 1);
+    #[cfg(unix)]
+    {
+        let target = temp.path().join("real-root");
+        fs::create_dir(&target)?;
+        let link = temp.path().join("root-link");
+        std::os::unix::fs::symlink(&target, &link)?;
+        assert_eq!(tinyskills::install(&link, &[bundle]).failed.len(), 1);
+    }
     Ok(())
 }
 

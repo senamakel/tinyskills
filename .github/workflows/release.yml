@@ -25,6 +25,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: true
+          submodules: recursive
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -60,4 +61,6 @@ jobs:
           git commit -m "Release v$next"
           git tag "v$next"
           git push origin HEAD:main "v$next"
-          gh release create "v$next" --generate-notes --title "v$next"
+          cargo package --locked --package tinyskills
+          gh release create "v$next" "target/package/tinyskills-${next}.crate" \
+            --generate-notes --title "v$next"

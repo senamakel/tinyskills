@@ -4,8 +4,10 @@ use crate::model::{SKILL_MD, WORKFLOW_MD};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const DIGEST_FILE: &str = ".digest";
+static TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// One UTF-8 file in a compile-time skill bundle.
 #[derive(Debug, Clone, Copy)]
@@ -48,7 +50,7 @@ impl BundledSkill {
     pub fn validate(self) -> Result<(), String> {
         if self.dir_name.is_empty()
             || self.dir_name.starts_with('.')
-            || self.dir_name.contains(['/', '\\'])
+            || self.dir_name.contains(['/', '\\', ':'])
         {
             return Err(format!(
                 "invalid bundled skill dir_name `{}`",
@@ -68,8 +70,15 @@ impl BundledSkill {
                 self.dir_name
             ));
         }
+        let mut paths = HashSet::with_capacity(self.files.len());
         for file in self.files {
             validate_relative_path(self.dir_name, file.path)?;
+            if !paths.insert(file.path) {
+                return Err(format!(
+                    "bundled skill `{}` contains duplicate file `{}`",
+                    self.dir_name, file.path
+                ));
+            }
         }
         Ok(())
     }
@@ -120,7 +129,11 @@ pub fn is_current_materialization(dir: &Path, bundle: BundledSkill) -> bool {
         if !metadata.is_file() || metadata.file_type().is_symlink() {
             return false;
         }
-        if std::fs::read(&path).ok().as_deref() != Some(file.contents.as_bytes()) {
+        if read_bounded(&path, file.contents.len() as u64 + 1)
+            .ok()
+            .as_deref()
+            != Some(file.contents.as_bytes())
+        {
             return false;
         }
     }
@@ -157,20 +170,48 @@ fn materialized_tree_is_exact(dir: &Path, expected: &HashSet<&str>) -> bool {
 
 fn install_one(root: &Path, bundle: BundledSkill) -> Result<bool, String> {
     bundle.validate()?;
+    std::fs::create_dir_all(root)
+        .map_err(|error| format!("failed to create bundle root {}: {error}", root.display()))?;
+    let root_metadata = std::fs::symlink_metadata(root)
+        .map_err(|error| format!("failed to inspect bundle root {}: {error}", root.display()))?;
+    if !root_metadata.is_dir() || root_metadata.file_type().is_symlink() {
+        return Err(format!(
+            "bundle root {} is not a real directory",
+            root.display()
+        ));
+    }
     let dir = root.join(bundle.dir_name);
     let digest = bundle.digest();
     let digest_path = dir.join(DIGEST_FILE);
-    if std::fs::read_to_string(&digest_path).is_ok_and(|found| found.trim() == digest)
-        && is_current_materialization(&dir, bundle)
-    {
+    let digest_matches = std::fs::symlink_metadata(&dir).is_ok_and(|metadata| {
+        metadata.is_dir()
+            && !metadata.file_type().is_symlink()
+            && std::fs::symlink_metadata(&digest_path).is_ok_and(|digest_metadata| {
+                digest_metadata.is_file() && !digest_metadata.file_type().is_symlink()
+            })
+            && read_bounded(&digest_path, digest.len() as u64 + 1)
+                .ok()
+                .and_then(|bytes| String::from_utf8(bytes).ok())
+                .is_some_and(|found| found.trim() == digest)
+    });
+    if digest_matches && is_current_materialization(&dir, bundle) {
         return Ok(false);
     }
-    if dir.exists() {
-        std::fs::remove_dir_all(&dir)
-            .map_err(|error| format!("failed to clear {}: {error}", dir.display()))?;
-    }
+    let nonce = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let temporary = root.join(format!(
+        ".{}.tmp-{}-{}",
+        bundle.dir_name,
+        std::process::id(),
+        nonce
+    ));
+    std::fs::create_dir(&temporary).map_err(|error| {
+        format!(
+            "failed to create staging directory {}: {error}",
+            temporary.display()
+        )
+    })?;
     for file in bundle.files {
-        let target = dir.join(file.path);
+        let target = temporary.join(file.path);
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
@@ -178,9 +219,61 @@ fn install_one(root: &Path, bundle: BundledSkill) -> Result<bool, String> {
         std::fs::write(&target, file.contents)
             .map_err(|error| format!("failed to write {}: {error}", target.display()))?;
     }
-    std::fs::write(&digest_path, digest)
+    std::fs::write(temporary.join(DIGEST_FILE), digest)
         .map_err(|error| format!("failed to write {}: {error}", digest_path.display()))?;
+
+    let backup = root.join(format!(
+        ".{}.backup-{}-{}",
+        bundle.dir_name,
+        std::process::id(),
+        nonce
+    ));
+    let had_existing = match std::fs::symlink_metadata(&dir) {
+        Ok(_) => {
+            std::fs::rename(&dir, &backup).map_err(|error| {
+                format!("failed to stage old bundle {}: {error}", dir.display())
+            })?;
+            true
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => return Err(format!("failed to inspect {}: {error}", dir.display())),
+    };
+    if let Err(error) = std::fs::rename(&temporary, &dir) {
+        if had_existing {
+            let _ = std::fs::rename(&backup, &dir);
+        }
+        let _ = std::fs::remove_dir_all(&temporary);
+        return Err(format!("failed to publish {}: {error}", dir.display()));
+    }
+    if had_existing {
+        remove_path(&backup).map_err(|error| {
+            format!("failed to remove old bundle {}: {error}", backup.display())
+        })?;
+    }
     Ok(true)
+}
+
+fn read_bounded(path: &Path, limit: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let file = std::fs::File::open(path)?;
+    let mut bytes = Vec::new();
+    file.take(limit).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 >= limit {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "file exceeds expected size",
+        ));
+    }
+    Ok(bytes)
+}
+
+fn remove_path(path: &Path) -> std::io::Result<()> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || metadata.is_file() {
+        std::fs::remove_file(path)
+    } else {
+        std::fs::remove_dir_all(path)
+    }
 }
 
 fn validate_relative_path(dir_name: &str, path: &str) -> Result<(), String> {
@@ -197,4 +290,69 @@ fn validate_relative_path(dir_name: &str, path: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    static FILES: &[BundledFile] = &[BundledFile {
+        path: "SKILL.md",
+        contents: "body",
+    }];
+
+    #[test]
+    fn reports_staging_directory_conflicts() -> Result<(), Box<dyn std::error::Error>> {
+        let _lock = TEST_LOCK.lock().map_err(|_| "test lock poisoned")?;
+        let root = tempfile::tempdir()?;
+        let nonce = 31_001;
+        TEMP_COUNTER.store(nonce, Ordering::Relaxed);
+        let staging = root
+            .path()
+            .join(format!(".demo.tmp-{}-{nonce}", std::process::id()));
+        std::fs::create_dir(&staging)?;
+        assert_eq!(
+            install(
+                root.path(),
+                &[BundledSkill {
+                    dir_name: "demo",
+                    files: FILES
+                }]
+            )
+            .failed
+            .len(),
+            1
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn reports_backup_directory_conflicts() -> Result<(), Box<dyn std::error::Error>> {
+        let _lock = TEST_LOCK.lock().map_err(|_| "test lock poisoned")?;
+        let root = tempfile::tempdir()?;
+        let nonce = 31_002;
+        TEMP_COUNTER.store(nonce, Ordering::Relaxed);
+        std::fs::create_dir(root.path().join("demo"))?;
+        let backup = root
+            .path()
+            .join(format!(".demo.backup-{}-{nonce}", std::process::id()));
+        std::fs::create_dir(&backup)?;
+        std::fs::write(backup.join("existing"), "old")?;
+        assert_eq!(
+            install(
+                root.path(),
+                &[BundledSkill {
+                    dir_name: "demo",
+                    files: FILES
+                }]
+            )
+            .failed
+            .len(),
+            1
+        );
+        Ok(())
+    }
 }

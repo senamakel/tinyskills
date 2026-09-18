@@ -72,12 +72,12 @@ fn bundled_materialization_replaces_tampered_content() -> Result<(), Box<dyn std
         files: FILES,
     };
     let temp = tempfile::tempdir()?;
-    let first = tinyskills::bundle::install(temp.path(), &[bundle]);
+    let first = tinyskills::install(temp.path(), &[bundle]);
     assert_eq!(first.written, ["demo"]);
     fs::write(temp.path().join("demo/SKILL.md"), "tampered")?;
-    let second = tinyskills::bundle::install(temp.path(), &[bundle]);
+    let second = tinyskills::install(temp.path(), &[bundle]);
     assert_eq!(second.written, ["demo"]);
-    assert!(tinyskills::bundle::is_current_materialization(
+    assert!(tinyskills::is_current_materialization(
         &temp.path().join("demo"),
         bundle
     ));

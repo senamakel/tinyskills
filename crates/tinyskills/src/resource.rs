@@ -2,6 +2,52 @@
 
 use crate::model::{MAX_RESOURCE_BYTES, Skill};
 use std::path::Path;
+use thiserror::Error;
+
+/// Errors returned while resolving or reading a skill resource.
+#[derive(Debug, Error)]
+pub enum ResourceError {
+    /// The requested path is not a normal relative path.
+    #[error("resource path must be a non-empty relative path containing only normal components")]
+    InvalidPath,
+    /// The skill does not point to a discovered on-disk bundle.
+    #[error("skill `{0}` has no on-disk location")]
+    NoLocation(String),
+    /// A filesystem operation failed.
+    #[error("{context} {path}: {source}")]
+    Io {
+        /// Operation that failed.
+        context: &'static str,
+        /// Path involved in the operation.
+        path: String,
+        /// Underlying filesystem error.
+        #[source]
+        source: std::io::Error,
+    },
+    /// The requested path is a symbolic link.
+    #[error("resource path is a symlink")]
+    Symlink,
+    /// The requested path is not a regular file.
+    #[error("resource path is not a regular file")]
+    NotRegular,
+    /// The file exceeds the resource size limit.
+    #[error("resource file is {size} bytes, exceeds limit of {limit}")]
+    TooLarge {
+        /// Actual file size observed.
+        size: u64,
+        /// Maximum permitted size.
+        limit: u64,
+    },
+    /// Canonicalization escaped the skill bundle.
+    #[error("resource path escapes skill root: {path}")]
+    Escapes {
+        /// Canonical path outside the skill root.
+        path: String,
+    },
+    /// The resource is not UTF-8 text.
+    #[error("resource is not valid UTF-8 text: {0}")]
+    InvalidUtf8(#[from] std::str::Utf8Error),
+}
 
 /// Resolve a skill by directory id or display name.
 ///
@@ -47,53 +93,70 @@ pub fn resolve_skill(
 ///
 /// Returns an error for invalid relative paths, missing/non-regular files,
 /// symlinks, traversal, oversized content, or invalid UTF-8.
-pub fn read_resource(skill: &Skill, relative_path: &Path) -> Result<String, String> {
+pub fn read_resource(skill: &Skill, relative_path: &Path) -> Result<String, ResourceError> {
     if relative_path.as_os_str().is_empty() || relative_path.is_absolute() {
-        return Err("resource path must be a non-empty relative path".to_owned());
+        return Err(ResourceError::InvalidPath);
     }
     if relative_path
         .components()
         .any(|component| !matches!(component, std::path::Component::Normal(_)))
     {
-        return Err("resource path must contain only normal relative components".to_owned());
+        return Err(ResourceError::InvalidPath);
     }
     let root = skill
         .location
         .as_deref()
         .and_then(Path::parent)
-        .ok_or_else(|| format!("skill '{}' has no on-disk location", skill.name))?;
+        .ok_or_else(|| ResourceError::NoLocation(skill.name.clone()))?;
     let canonical_root = std::fs::canonicalize(root)
-        .map_err(|error| io_error("failed to canonicalize skill root", root, &error))?;
+        .map_err(|error| io_error("failed to canonicalize skill root", root, error))?;
     let requested = canonical_root.join(relative_path);
     let metadata = std::fs::symlink_metadata(&requested)
-        .map_err(|error| format!("failed to stat resource {}: {error}", requested.display()))?;
+        .map_err(|error| io_error("failed to stat resource", &requested, error))?;
     if metadata.file_type().is_symlink() {
-        return Err("resource path is a symlink".to_owned());
+        return Err(ResourceError::Symlink);
     }
     if !metadata.is_file() {
-        return Err("resource path is not a regular file".to_owned());
+        return Err(ResourceError::NotRegular);
     }
     if metadata.len() > MAX_RESOURCE_BYTES {
-        return Err(format!(
-            "resource file is {} bytes, exceeds limit of {MAX_RESOURCE_BYTES}",
-            metadata.len()
-        ));
+        return Err(ResourceError::TooLarge {
+            size: metadata.len(),
+            limit: MAX_RESOURCE_BYTES,
+        });
     }
     let canonical_requested = std::fs::canonicalize(&requested)
-        .map_err(|error| io_error("failed to canonicalize resource", &requested, &error))?;
+        .map_err(|error| io_error("failed to canonicalize resource", &requested, error))?;
     if !canonical_requested.starts_with(&canonical_root) {
-        return Err(format!(
-            "resource path escapes skill root: {}",
-            canonical_requested.display()
-        ));
+        return Err(ResourceError::Escapes {
+            path: canonical_requested.display().to_string(),
+        });
     }
-    let bytes = std::fs::read(&canonical_requested)
-        .map_err(|error| io_error("failed to read resource", &canonical_requested, &error))?;
+    let bytes = read_bounded(&canonical_requested, MAX_RESOURCE_BYTES)
+        .map_err(|error| io_error("failed to read resource", &canonical_requested, error))?;
     std::str::from_utf8(&bytes)
         .map(str::to_owned)
-        .map_err(|error| format!("resource is not valid UTF-8 text: {error}"))
+        .map_err(ResourceError::InvalidUtf8)
 }
 
-fn io_error(context: &str, path: &Path, error: &std::io::Error) -> String {
-    format!("{context} {}: {error}", path.display())
+fn read_bounded(path: &Path, limit: u64) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let file = std::fs::File::open(path)?;
+    let mut bytes = Vec::new();
+    file.take(limit.saturating_add(1)).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > limit {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "file grew beyond its limit while reading",
+        ));
+    }
+    Ok(bytes)
+}
+
+fn io_error(context: &'static str, path: &Path, source: std::io::Error) -> ResourceError {
+    ResourceError::Io {
+        context,
+        path: path.display().to_string(),
+        source,
+    }
 }
