@@ -9,11 +9,15 @@
 pub mod bundle;
 pub mod discovery;
 pub mod document;
+pub mod install;
 pub mod model;
 pub mod resource;
 
 pub use bundle::{BundledFile, BundledSkill, InstallReport};
 pub use discovery::{DiscoveryRoot, discover, load_skill_dir, resolve_collisions, scan_root};
 pub use document::{inventory_resources, parse_skill, parse_skill_str};
+pub use install::{
+    derive_install_slug, normalize_install_url, validate_install_url, validate_resolved_host,
+};
 pub use model::{Skill, SkillFrontmatter, SkillScope};
 pub use resource::{read_resource, resolve_skill};
