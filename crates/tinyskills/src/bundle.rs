@@ -3,6 +3,7 @@
 use crate::model::{SKILL_MD, WORKFLOW_MD};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -38,7 +39,12 @@ impl BundledSkill {
             hasher.update((file.contents.len() as u64).to_le_bytes());
             hasher.update(file.contents.as_bytes());
         }
-        format!("{:x}", hasher.finalize())
+        let digest = hasher.finalize();
+        let mut hex = String::with_capacity(digest.len() * 2);
+        for byte in digest.as_slice() {
+            let _ = write!(hex, "{byte:02x}");
+        }
+        hex
     }
 
     /// Validate that materializing this bundle cannot escape its destination.
