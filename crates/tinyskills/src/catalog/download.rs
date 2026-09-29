@@ -51,7 +51,10 @@ pub fn derive_download_url(
     if let Some(base) = download_base_override {
         let base = base.trim().trim_end_matches('/');
         if !base.is_empty() {
-            return format!("{base}/{name}/SKILL.md");
+            // Validate name as a single path segment to prevent traversal
+            if !name.contains(['/', '\\']) && name != ".." && name != "." {
+                return format!("{base}/{name}/SKILL.md");
+            }
         }
     }
     if let Some(url) = docs_path.and_then(download_url_from_docs_path) {
