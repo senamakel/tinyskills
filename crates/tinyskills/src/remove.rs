@@ -72,7 +72,7 @@ pub fn remove_bundle(roots: &[PathBuf], slug: &str) -> Result<PathBuf, RemoveErr
     if slug.is_empty() {
         return Err(RemoveError::EmptyName);
     }
-    if slug.contains(['/', '\\']) || slug.contains("..") || slug == "." {
+    if slug.contains(['/', '\\']) || slug == ".." || slug == "." {
         return Err(RemoveError::PathSeparators(slug.to_owned()));
     }
     if slug.len() > MAX_NAME_LEN {
