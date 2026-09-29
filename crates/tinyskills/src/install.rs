@@ -585,6 +585,8 @@ pub fn write_installed_document(
     });
     if let Err(error) = result {
         let _ = std::fs::remove_file(&temp_file);
+        // Clean up the directory we created, but only if it's empty or contains only our temp file
+        let _ = std::fs::remove_dir(&target_dir);
         return Err(error);
     }
     #[cfg(unix)]
