@@ -540,3 +540,50 @@ async fn streams_keep_ids_that_sanitize_alike_distinct() {
     assert!(store.clear("run/a").await.unwrap());
     assert_eq!(store.list(Some("workflow_a"), 10).await.unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn stream_batches_reject_headers_and_appends_over_the_batch_limit() {
+    let store = store("tenant-a");
+    let large_text = "x".repeat(RECORD_CHUNK_BYTES * (MAX_BATCH_RECORDS + 1));
+    assert!(matches!(
+        store
+            .start(run(
+                "workflow-a",
+                "run-large-header",
+                "2026-01-01T00:00:00Z",
+                &large_text,
+            ))
+            .await,
+        Err(RunLogError::Backend(_))
+    ));
+
+    store
+        .start(run(
+            "workflow-a",
+            "run-large-append",
+            "2026-01-01T00:00:00Z",
+            "prompt",
+        ))
+        .await
+        .unwrap();
+    assert!(matches!(
+        store.append("run-large-append", &large_text).await,
+        Err(RunLogError::Backend(_))
+    ));
+    assert!(
+        store
+            .tail("run-large-append", None, 4096)
+            .await
+            .unwrap()
+            .content
+            .contains("prompt")
+    );
+}
+
+#[test]
+fn stream_store_debug_does_not_expose_scope() {
+    let store = store("private-tenant-label");
+    let debug = format!("{store:?}");
+    assert!(debug.contains("StreamRunLogStore"));
+    assert!(!debug.contains("private-tenant-label"));
+}

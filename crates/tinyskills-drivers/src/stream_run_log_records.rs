@@ -48,12 +48,9 @@ pub(super) fn text_records(text: &str) -> Result<Vec<Value>, RunLogError> {
         while end > start && !text.is_char_boundary(end) {
             end -= 1;
         }
-        if end == start {
-            end = text[start..]
-                .char_indices()
-                .nth(1)
-                .map_or(text.len(), |(offset, _)| start + offset);
-        }
+        // A UTF-8 scalar uses at most four bytes and the fixed chunk limit is
+        // larger than that, so the preceding boundary adjustment always
+        // leaves at least one complete scalar.
         records.push(record_value(&StreamRecord::Text {
             text: text[start..end].to_owned(),
         })?);
