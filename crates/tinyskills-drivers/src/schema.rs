@@ -5,7 +5,7 @@
 //! |---|---|---|
 //! | collection `tinyskills_catalogs` | collection `skills.catalogs` (schema 2) | tenant |
 //! | blobs `<host prefix>/<bundle id>/…` | blobs `skills/bundles/<bundle id>/…` | tenant |
-//! | — | streams `skills/run_logs/<run id>` | tenant |
+//! | — | streams `skills.run_logs/<run id>` | tenant |
 //!
 //! The host composes [`storage_schema`] into its `Registry`, which declares
 //! the items, derives the module grant and runs the steps.

@@ -2,25 +2,27 @@
 
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tinyskills::run_log::{self, ScannedRun};
 use tinyskills::{RunCursor, RunLogError, RunLogFuture, RunLogPage, RunLogStart, RunLogStore};
 use tinystoragedrivers_core::{StorageError, StreamStore};
 
+#[path = "stream_run_log_records.rs"]
+mod records;
+use records::{StreamRecord, record_value, text_records, update_summary};
+#[path = "stream_run_log_cursor.rs"]
+mod cursor;
+use cursor::{
+    StreamCursorState, cursor_state, decode_hex, encode_cursor, hex, validate_cursor_owner,
+};
+
 /// Prefix for run streams, declared as a tenant-scoped item by [`crate::storage_schema`].
-pub const RUN_LOG_PREFIX: &str = "skills/run_logs";
+pub const RUN_LOG_PREFIX: &str = "skills.run_logs";
 
-#[derive(Debug, Serialize, Deserialize)]
-struct StreamCursorState {
-    backend: String,
-    run_id: String,
-    generation: String,
-    position: u64,
-    within: usize,
-}
+const RECORD_CHUNK_BYTES: usize = 1024;
+const MAX_BATCH_RECORDS: usize = 256;
+const APPEND_RETRIES: usize = 4;
 
-/// Run logs stored as one string record per append under [`RUN_LOG_PREFIX`].
+/// Run logs stored as UTF-8 text chunks with versioned metadata checkpoints.
 #[derive(Clone)]
 pub struct StreamRunLogStore {
     streams: Arc<dyn StreamStore>,
@@ -76,61 +78,87 @@ impl StreamRunLogStore {
         format!("stream:{RUN_LOG_PREFIX}:{}", self.scope_id)
     }
 
-    async fn read_all(&self, stream: &str) -> Result<String, RunLogError> {
-        let length = self
+    async fn record(&self, stream: &str, offset: u64) -> Result<StreamRecord, RunLogError> {
+        let entry = self
             .streams
-            .len(stream)
-            .await
-            .map_err(|error| storage_error(&error))?;
-        let mut text = String::new();
-        let mut from = 0;
-        while from < length {
-            let entries = self
-                .streams
-                .read_window(stream, from, 128)
-                .await
-                .map_err(|error| storage_error(&error))?;
-            if entries.is_empty() {
-                break;
-            }
-            for entry in entries {
-                let Some(chunk) = entry.value.as_str() else {
-                    return Err(RunLogError::Backend(
-                        "run stream contains a non-text record".into(),
-                    ));
-                };
-                text.push_str(chunk);
-                from = entry.offset.saturating_add(1);
-            }
-        }
-        Ok(text)
-    }
-
-    async fn generation(&self, stream: &str) -> Result<String, RunLogError> {
-        let Some(entry) = self
-            .streams
-            .read_window(stream, 0, 1)
+            .read_window(stream, offset, 1)
             .await
             .map_err(|error| storage_error(&error))?
             .into_iter()
             .next()
-        else {
-            return Err(RunLogError::Backend("run stream is empty".into()));
-        };
-        entry
-            .value
-            .as_str()
-            .and_then(|header| {
-                header
-                    .lines()
-                    .find_map(|line| line.strip_prefix("run_generation: "))
-            })
-            .map(str::to_owned)
-            .ok_or_else(|| RunLogError::Backend("run generation is missing".into()))
+            .ok_or_else(|| RunLogError::Backend("run stream record is missing".into()))?;
+        if entry.offset != offset {
+            return Err(RunLogError::Backend(
+                "run stream record offset changed".into(),
+            ));
+        }
+        serde_json::from_value(entry.value)
+            .map_err(|_| RunLogError::Backend("run stream record is malformed".into()))
     }
 
-    async fn complete(&self, stream: &str) -> Result<bool, RunLogError> {
-        Ok(self.read_all(stream).await?.contains("\n--- result ---\n"))
+    async fn checkpoint(
+        &self,
+        stream: &str,
+        length: u64,
+    ) -> Result<(u64, StreamRecord), RunLogError> {
+        if length < 3 {
+            return Err(RunLogError::Backend("run stream is incomplete".into()));
+        }
+        let offset = length - 1;
+        let record = self.record(stream, offset).await?;
+        Ok((offset, record))
+    }
+
+    async fn validate_header(
+        &self,
+        stream: &str,
+        run_id: &str,
+    ) -> Result<(String, String, String), RunLogError> {
+        let record = self.record(stream, 0).await?;
+        match record {
+            StreamRecord::Header {
+                schema: 1,
+                scope_id,
+                run_id: owner,
+                workflow_id,
+                generation,
+            } if scope_id == self.scope_id
+                && owner == run_id
+                && !workflow_id.is_empty()
+                && !generation.is_empty() =>
+            {
+                Ok((scope_id, generation, workflow_id))
+            }
+            _ => Err(RunLogError::Backend(
+                "run stream header is malformed".into(),
+            )),
+        }
+    }
+
+    fn validate_checkpoint(
+        &self,
+        record: StreamRecord,
+        run_id: &str,
+        generation: &str,
+    ) -> Result<run_log::RunLogSummary, RunLogError> {
+        match record {
+            StreamRecord::Checkpoint {
+                schema: 1,
+                scope_id,
+                run_id: owner,
+                generation: record_generation,
+                summary,
+            } if scope_id == self.scope_id
+                && owner == run_id
+                && record_generation == generation
+                && summary.run.run_id == run_id =>
+            {
+                Ok(summary)
+            }
+            _ => Err(RunLogError::Backend(
+                "run stream checkpoint is malformed".into(),
+            )),
+        }
     }
 }
 
@@ -140,17 +168,43 @@ impl RunLogStore for StreamRunLogStore {
             let stream = Self::stream_name(run.run_id)?;
             validate_id(run.workflow_id)?;
             validate_started(run.started)?;
-            let mut header = run_log::format_header(
-                run.workflow_id,
-                run.run_id,
-                run.started,
-                run.inputs,
-                run.task_prompt,
+            let generation = new_generation();
+            let mut text = format!(
+                "run_generation: {generation}\n{}",
+                run_log::format_header(
+                    run.workflow_id,
+                    run.run_id,
+                    run.started,
+                    run.inputs,
+                    run.task_prompt,
+                )
             );
-            header = format!("run_generation: {}\n{header}", new_generation());
-            header.push('\n');
+            text.push('\n');
+            let log_uri = format!("stream://{stream}");
+            let summary = run_log::read_run_log_summary_from_text(&text, &log_uri)
+                .ok_or_else(|| RunLogError::Backend("run header is malformed".into()))?;
+            let mut values = vec![record_value(&StreamRecord::Header {
+                schema: 1,
+                scope_id: self.scope_id.clone(),
+                run_id: run.run_id.to_owned(),
+                workflow_id: run.workflow_id.to_owned(),
+                generation: generation.clone(),
+            })?];
+            values.extend(text_records(&text)?);
+            values.push(record_value(&StreamRecord::Checkpoint {
+                schema: 1,
+                scope_id: self.scope_id.clone(),
+                run_id: run.run_id.to_owned(),
+                generation,
+                summary,
+            })?);
+            if values.len() > MAX_BATCH_RECORDS {
+                return Err(RunLogError::Backend(
+                    "run header exceeds the stream batch limit".into(),
+                ));
+            }
             self.streams
-                .append_batch_if_offset(&stream, 0, vec![Value::String(header)])
+                .append_batch_if_offset(&stream, 0, values)
                 .await
                 .map_err(|error| storage_error(&error))?;
             Ok(())
@@ -160,24 +214,57 @@ impl RunLogStore for StreamRunLogStore {
     fn append<'a>(&'a self, run_id: &'a str, line: &'a str) -> RunLogFuture<'a, ()> {
         Box::pin(async move {
             let stream = Self::stream_name(run_id)?;
-            if self
-                .streams
-                .len(&stream)
-                .await
-                .map_err(|error| storage_error(&error))?
-                == 0
-            {
-                return Err(RunLogError::Backend("run log not found".into()));
+            let mut text = line.to_owned();
+            if !text.ends_with('\n') {
+                text.push('\n');
             }
-            let mut line = line.to_owned();
-            if !line.ends_with('\n') {
-                line.push('\n');
+            for _ in 0..APPEND_RETRIES {
+                let length = self
+                    .streams
+                    .len(&stream)
+                    .await
+                    .map_err(|error| storage_error(&error))?;
+                if length == 0 {
+                    return Err(RunLogError::Backend("run log not found".into()));
+                }
+                let (scope_id, generation, workflow_id) =
+                    self.validate_header(&stream, run_id).await?;
+                let (_, checkpoint) = self.checkpoint(&stream, length).await?;
+                let mut summary = self.validate_checkpoint(checkpoint, run_id, &generation)?;
+                if summary.run.workflow_id != workflow_id {
+                    return Err(RunLogError::Backend("run stream metadata mismatch".into()));
+                }
+                update_summary(&mut summary, &text);
+                let mut values = text_records(&text)?;
+                values.push(record_value(&StreamRecord::Checkpoint {
+                    schema: 1,
+                    scope_id,
+                    run_id: run_id.to_owned(),
+                    generation,
+                    summary,
+                })?);
+                if values.len() > MAX_BATCH_RECORDS {
+                    return Err(RunLogError::Backend(
+                        "run append exceeds the stream batch limit".into(),
+                    ));
+                }
+                match self
+                    .streams
+                    .append_batch_if_offset(&stream, length, values)
+                    .await
+                {
+                    Ok(_) => return Ok(()),
+                    Err(error)
+                        if error.kind == tinystoragedrivers_core::StorageErrorKind::Conflict =>
+                    {
+                        continue;
+                    }
+                    Err(error) => return Err(storage_error(&error)),
+                }
             }
-            self.streams
-                .append(&stream, Value::String(line))
-                .await
-                .map_err(|error| storage_error(&error))?;
-            Ok(())
+            Err(RunLogError::Backend(
+                "run stream changed during every bounded append retry".into(),
+            ))
         })
     }
 
@@ -194,55 +281,74 @@ impl RunLogStore for StreamRunLogStore {
             if let Some(cursor) = cursor {
                 validate_cursor_owner(cursor, &backend, run_id)?;
             }
-            let generation = self.generation(&stream).await?;
-            let (mut offset, mut within) = cursor.map_or(Ok((0, 0)), |cursor| {
-                cursor_state(cursor, &backend, run_id, &generation)
-            })?;
-            let mut content = Vec::with_capacity(max_bytes);
+            let (scope_id, generation, workflow_id) = self.validate_header(&stream, run_id).await?;
             let length = self
                 .streams
                 .len(&stream)
                 .await
                 .map_err(|error| storage_error(&error))?;
-            if offset > length {
+            let (checkpoint_offset, checkpoint) = self.checkpoint(&stream, length).await?;
+            let summary = self.validate_checkpoint(checkpoint, run_id, &generation)?;
+            if scope_id != self.scope_id || summary.run.workflow_id != workflow_id {
+                return Err(RunLogError::Backend("run stream metadata mismatch".into()));
+            }
+            let (mut offset, mut within) = cursor.map_or(Ok((0, 0)), |cursor| {
+                cursor_state(cursor, &backend, run_id, &generation)
+            })?;
+            if offset > length
+                || (offset > checkpoint_offset && offset != length)
+                || within > RECORD_CHUNK_BYTES
+            {
                 return Err(RunLogError::InvalidCursor);
             }
-            if offset == length && within != 0 {
-                return Err(RunLogError::InvalidCursor);
-            }
-            while content.len() < max_bytes && offset < length {
-                let Some(entry) = self
-                    .streams
-                    .read_window(&stream, offset, 1)
-                    .await
-                    .map_err(|error| storage_error(&error))?
-                    .into_iter()
-                    .next()
-                else {
-                    break;
-                };
-                let Some(chunk) = entry.value.as_str() else {
-                    return Err(RunLogError::Backend(
-                        "run stream contains a non-text record".into(),
-                    ));
-                };
-                let bytes = chunk.as_bytes();
-                if within > bytes.len() {
+            if offset == 0 {
+                if within != 0 {
                     return Err(RunLogError::InvalidCursor);
                 }
-                let count = (max_bytes - content.len()).min(bytes.len() - within);
-                content.extend_from_slice(&bytes[within..within + count]);
-                if within + count == bytes.len() {
-                    offset = entry.offset.saturating_add(1);
-                    within = 0;
-                } else {
-                    within += count;
+                offset = 1;
+            }
+            if offset >= checkpoint_offset && within != 0 {
+                return Err(RunLogError::InvalidCursor);
+            }
+            let target = max_bytes.max(1);
+            let mut content = String::with_capacity(target);
+            while content.len() < target && offset <= checkpoint_offset {
+                if offset == checkpoint_offset {
+                    offset += 1;
+                    break;
+                }
+                match self.record(&stream, offset).await? {
+                    StreamRecord::Header { .. } if offset == 0 => offset += 1,
+                    StreamRecord::Text { text } => {
+                        if within > text.len() || !text.is_char_boundary(within) {
+                            return Err(RunLogError::InvalidCursor);
+                        }
+                        let target_end = within
+                            .saturating_add(target - content.len())
+                            .min(text.len());
+                        let mut end = target_end;
+                        while end < text.len() && !text.is_char_boundary(end) {
+                            end += 1;
+                        }
+                        content.push_str(&text[within..end]);
+                        if end == text.len() {
+                            offset += 1;
+                            within = 0;
+                        } else {
+                            within = end;
+                        }
+                    }
+                    StreamRecord::Checkpoint { .. } => offset += 1,
+                    _ => {
+                        return Err(RunLogError::Backend(
+                            "run stream record is malformed".into(),
+                        ));
+                    }
                 }
             }
-            let complete = self.complete(&stream).await?;
-            let eof = offset >= length && within == 0;
+            let eof = offset > checkpoint_offset && within == 0;
             Ok(RunLogPage {
-                content: String::from_utf8_lossy(&content).into_owned(),
+                content,
                 cursor: RunCursor::from_opaque(encode_cursor(&StreamCursorState {
                     backend,
                     run_id: run_id.to_owned(),
@@ -251,7 +357,7 @@ impl RunLogStore for StreamRunLogStore {
                     within,
                 })?),
                 eof,
-                complete,
+                complete: summary.complete,
             })
         })
     }
@@ -275,13 +381,20 @@ impl RunLogStore for StreamRunLogStore {
                 let Some(run_id) = Self::decode_run_id(&stream) else {
                     continue;
                 };
-                let text = self.read_all(&stream).await?;
-                let log_uri = format!("stream://{stream}");
-                if let Some(run) = run_log::parse_run_log_text(&text, &log_uri)
-                    && run.run_id == run_id
-                    && workflow_id.is_none_or(|want| run.workflow_id == want)
+                let length = self
+                    .streams
+                    .len(&stream)
+                    .await
+                    .map_err(|error| storage_error(&error))?;
+                let (_, generation, header_workflow_id) =
+                    self.validate_header(&stream, &run_id).await?;
+                let (_, checkpoint) = self.checkpoint(&stream, length).await?;
+                let summary = self.validate_checkpoint(checkpoint, &run_id, &generation)?;
+                if summary.run.run_id == run_id
+                    && summary.run.workflow_id == header_workflow_id
+                    && workflow_id.is_none_or(|want| summary.run.workflow_id == want)
                 {
-                    runs.push(run);
+                    runs.push(summary.run);
                 }
             }
             runs.sort_by(|left, right| right.started.cmp(&left.started));
@@ -328,42 +441,6 @@ fn validate_started(value: &str) -> Result<(), RunLogError> {
     Ok(())
 }
 
-fn encode_cursor(state: &StreamCursorState) -> Result<String, RunLogError> {
-    let bytes =
-        serde_json::to_vec(state).map_err(|error| RunLogError::Backend(error.to_string()))?;
-    Ok(hex(&bytes))
-}
-
-fn cursor_state(
-    cursor: &RunCursor,
-    backend: &str,
-    run_id: &str,
-    generation: &str,
-) -> Result<(u64, usize), RunLogError> {
-    validate_cursor_owner(cursor, backend, run_id)?;
-    let bytes = decode_hex(cursor.as_opaque()).ok_or(RunLogError::InvalidCursor)?;
-    let state: StreamCursorState =
-        serde_json::from_slice(&bytes).map_err(|_| RunLogError::InvalidCursor)?;
-    if state.backend != backend || state.run_id != run_id || state.generation != generation {
-        return Err(RunLogError::InvalidCursor);
-    }
-    Ok((state.position, state.within))
-}
-
-fn validate_cursor_owner(
-    cursor: &RunCursor,
-    backend: &str,
-    run_id: &str,
-) -> Result<(), RunLogError> {
-    let bytes = decode_hex(cursor.as_opaque()).ok_or(RunLogError::InvalidCursor)?;
-    let state: StreamCursorState =
-        serde_json::from_slice(&bytes).map_err(|_| RunLogError::InvalidCursor)?;
-    if state.backend != backend || state.run_id != run_id {
-        return Err(RunLogError::InvalidCursor);
-    }
-    Ok(())
-}
-
 fn new_generation() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -373,29 +450,6 @@ fn new_generation() -> String {
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_nanos());
     format!("{nanos:x}-{:x}", NEXT.fetch_add(1, Ordering::Relaxed))
-}
-
-fn hex(bytes: &[u8]) -> String {
-    let mut encoded = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        encoded.push(char::from(b"0123456789abcdef"[(byte >> 4) as usize]));
-        encoded.push(char::from(b"0123456789abcdef"[(byte & 0x0f) as usize]));
-    }
-    encoded
-}
-
-fn decode_hex(value: &str) -> Option<Vec<u8>> {
-    if value.len() > 8192 || !value.len().is_multiple_of(2) {
-        return None;
-    }
-    value
-        .as_bytes()
-        .chunks(2)
-        .map(|pair| {
-            let pair = std::str::from_utf8(pair).ok()?;
-            u8::from_str_radix(pair, 16).ok()
-        })
-        .collect()
 }
 
 #[cfg(test)]

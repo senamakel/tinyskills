@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use super::*;
+use serde_json::Value;
 use tinystoragedrivers_core::{MemoryStorage, Scope, StorageBackend, StreamEntry, StreamStore};
 
 #[derive(Debug, Default)]
@@ -174,7 +175,7 @@ async fn streams_create_append_list_tail_and_clear_runs() {
     assert_eq!(runs[1].workflow_id, "workflow-a");
     assert_eq!(runs[1].status, "DONE");
     assert_eq!(runs[1].duration_ms, Some(19));
-    assert!(runs[1].log_path.starts_with("stream://skills/run_logs/"));
+    assert!(runs[1].log_path.starts_with("stream://skills.run_logs/"));
     assert_eq!(
         second_handle
             .list(Some("workflow-a"), 10)
@@ -292,8 +293,13 @@ async fn concurrent_stream_starts_use_conditional_append() {
     let runs = store.list(None, 10).await.unwrap();
     assert_eq!(runs.len(), 1);
     let stream = StreamRunLogStore::stream_name("run-race1234").unwrap();
-    let header = store.read_all(&stream).await.unwrap();
-    assert_eq!(header.matches("run_generation:").count(), 1);
+    let record = store.record(&stream, 1).await.unwrap();
+    assert!(matches!(&record, StreamRecord::Text { .. }));
+    let text = match record {
+        StreamRecord::Text { text } => text,
+        _ => String::new(),
+    };
+    assert_eq!(text.matches("run_generation:").count(), 1);
 }
 
 #[tokio::test]
@@ -404,7 +410,7 @@ async fn stream_rejects_a_cursor_inside_a_utf8_scalar() {
         else {
             continue;
         };
-        let Some(value) = entry.value.as_str() else {
+        let Ok(StreamRecord::Text { text: value }) = serde_json::from_value(entry.value) else {
             continue;
         };
         if let Some(within) = value.find("🙂") {
