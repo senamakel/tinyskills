@@ -14,7 +14,11 @@ pub struct BundleFile {
     pub bytes: Vec<u8>,
 }
 
-/// Content limits applied before a bundle becomes publishable.
+/// Content and traversal limits applied before a bundle becomes publishable.
+///
+/// Filesystem imports also cap all visited entries, including directories, at
+/// `max_files * max_depth` (saturating on arithmetic overflow). This prevents
+/// empty directories from bypassing the file-count limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BundleLimits {
     /// Maximum file count including the primary document.
@@ -25,6 +29,8 @@ pub struct BundleLimits {
     pub max_total_bytes: usize,
     /// Maximum bytes in one relative name.
     pub max_path_bytes: usize,
+    /// Maximum number of path segments from the bundle root to a file.
+    pub max_depth: usize,
 }
 
 impl Default for BundleLimits {
@@ -34,6 +40,7 @@ impl Default for BundleLimits {
             max_file_bytes: 16 * 1024 * 1024,
             max_total_bytes: 64 * 1024 * 1024,
             max_path_bytes: 1024,
+            max_depth: 64,
         }
     }
 }
@@ -51,6 +58,9 @@ pub enum BundleContentError {
     /// A file would also have to be a directory.
     #[error("bundle file conflicts with a parent directory")]
     PathConflict,
+    /// The bundle has neither of its recognized primary documents.
+    #[error("bundle is missing its primary document")]
+    MissingDocument,
     /// A requested limit was exceeded.
     #[error("bundle exceeds its {0} limit")]
     Limit(&'static str),
@@ -106,6 +116,9 @@ impl UserBundle {
         for file in &resources {
             if file.path.len() > limits.max_path_bytes {
                 return Err(BundleContentError::Limit("path bytes"));
+            }
+            if file.path.split('/').count() > limits.max_depth {
+                return Err(BundleContentError::Limit("depth"));
             }
             if !file.path.split('/').all(portable_segment) {
                 return Err(BundleContentError::InvalidPath);
@@ -208,6 +221,10 @@ fn portable_segment(segment: &str) -> bool {
                 number.len() == 1 && matches!(number.as_bytes()[0], b'1'..=b'9')
             })
         })
+}
+
+pub(crate) fn is_portable_bundle_path(path: &str) -> bool {
+    !path.is_empty() && path.split('/').all(portable_segment)
 }
 
 fn hex(digest: &[u8]) -> String {

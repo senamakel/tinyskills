@@ -149,21 +149,23 @@ pub struct BundleSpec {
     pub allowed_tools: Vec<String>,
 }
 
-/// Options controlling [`scaffold_bundle`].
+/// Options controlling [`scaffold_bundle_in_scratch`].
 #[derive(Debug, Clone, Default)]
 pub struct ScaffoldOptions {
     /// Edit an existing bundle instead of creating a new one. The existing
     /// document body is preserved and only the frontmatter is rewritten, and
     /// the other document filename is removed so discovery sees no duplicate.
     pub overwrite: bool,
-    /// Extra roots searched for an existing bundle on edit when it is not
-    /// under the primary root (for example pre-rename locations).
+    /// Read-only legacy sources searched for an existing bundle on edit when
+    /// it is not under the scratch root (for example pre-rename locations).
     pub legacy_roots: Vec<PathBuf>,
     /// Document filename to write.
     pub document: BundleDocument,
+    /// Resource count, size, path, and depth budget for store-backed imports.
+    pub limits: crate::BundleLimits,
 }
 
-/// Result of a successful [`scaffold_bundle`].
+/// Result of a successful [`scaffold_bundle_in_scratch`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScaffoldOutcome {
     /// Slug of the bundle.
@@ -406,24 +408,22 @@ pub fn render_workflow_md(spec: &BundleSpec) -> String {
     out
 }
 
-/// Create or update a bundle directory under `root`.
+/// Create or update a bundle directory under caller-owned scratch space.
 ///
 /// `root` is created if needed and canonicalized; the bundle directory
 /// `root/<spec.slug>` must stay inside it and must not be a symlink. On
 /// create the directory must not exist. On edit ([`ScaffoldOptions::overwrite`])
-/// it must exist (checked under `root` first, then each legacy root), the
-/// existing body is kept, and the other document filename is removed. The
-/// conventional resource directories are created either way.
-///
-/// The host keeps root choice, trust checks, product sidecar files, cache
-/// invalidation, and notifications.
+/// the bundle must exist under the scratch root or a read-only legacy source
+/// is copied into it first. The existing body is kept, the other document
+/// filename is removed, and conventional resource directories are created.
+/// Persistent publication belongs to [`crate::scaffold_bundle_in_store`].
 ///
 /// # Errors
 ///
 /// Returns an error for an unsafe slug, an invalid description, root or
 /// containment failures, create/edit precondition failures, an edit whose
 /// existing body cannot be parsed, or filesystem failures.
-pub fn scaffold_bundle(
+pub fn scaffold_bundle_in_scratch(
     root: &Path,
     spec: &BundleSpec,
     options: &ScaffoldOptions,
@@ -436,7 +436,7 @@ pub fn scaffold_bundle(
     let canonical_root = std::fs::canonicalize(root)
         .map_err(|error| io_error("failed to canonicalize skills root", root, error))?;
 
-    let mut dir = canonical_root.join(&spec.slug);
+    let dir = canonical_root.join(&spec.slug);
     if !dir.starts_with(&canonical_root) {
         return Err(AuthoringError::Escapes {
             dir: dir.display().to_string(),
@@ -447,7 +447,14 @@ pub fn scaffold_bundle(
         && !dir.exists()
         && let Some(legacy) = find_in_roots(&options.legacy_roots, &spec.slug)
     {
-        dir = legacy;
+        let metadata = std::fs::symlink_metadata(&legacy)
+            .map_err(|error| io_error("failed to inspect legacy bundle", &legacy, error))?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(AuthoringError::SymlinkedDir {
+                dir: legacy.display().to_string(),
+            });
+        }
+        copy_tree(&legacy, &dir)?;
     }
     if std::fs::symlink_metadata(&dir).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
         return Err(AuthoringError::SymlinkedDir {
@@ -517,7 +524,7 @@ pub fn scaffold_bundle(
     })
 }
 
-fn validate_slug(slug: &str) -> Result<(), AuthoringError> {
+pub(crate) fn validate_slug(slug: &str) -> Result<(), AuthoringError> {
     let mut components = Path::new(slug).components();
     let single = matches!(
         (components.next(), components.next()),
@@ -537,6 +544,39 @@ fn find_in_roots(roots: &[PathBuf], slug: &str) -> Option<PathBuf> {
         let candidate = canonical_root.join(slug);
         (candidate.starts_with(&canonical_root) && candidate.exists()).then_some(candidate)
     })
+}
+
+fn copy_tree(source: &Path, destination: &Path) -> Result<(), AuthoringError> {
+    std::fs::create_dir_all(destination)
+        .map_err(|error| io_error("failed to create scratch bundle", destination, error))?;
+    for entry in std::fs::read_dir(source)
+        .map_err(|error| io_error("failed to read legacy bundle", source, error))?
+    {
+        let entry =
+            entry.map_err(|error| io_error("failed to read legacy bundle", source, error))?;
+        let path = entry.path();
+        let metadata = std::fs::symlink_metadata(&path)
+            .map_err(|error| io_error("failed to inspect legacy entry", &path, error))?;
+        let target = destination.join(entry.file_name());
+        if metadata.file_type().is_symlink() {
+            return Err(AuthoringError::SymlinkedDir {
+                dir: path.display().to_string(),
+            });
+        }
+        if metadata.is_dir() {
+            copy_tree(&path, &target)?;
+        } else if metadata.is_file() {
+            std::fs::copy(&path, &target)
+                .map_err(|error| io_error("failed to copy legacy entry", &path, error))?;
+        } else {
+            return Err(io_error(
+                "unsupported legacy entry",
+                &path,
+                std::io::Error::other("unsupported file type"),
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn io_error(context: &'static str, path: &Path, source: std::io::Error) -> AuthoringError {

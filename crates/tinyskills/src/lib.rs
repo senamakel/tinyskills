@@ -26,7 +26,6 @@ mod materialize;
 mod model;
 #[cfg(feature = "registry")]
 mod registry;
-mod remove;
 mod resource;
 pub mod run_log;
 mod run_log_store;
@@ -35,6 +34,7 @@ mod scan;
 mod scan_gate;
 mod search;
 mod slug;
+mod store_ops;
 mod trigger;
 mod user_bundle;
 
@@ -46,10 +46,10 @@ pub use archive::{
 pub use authoring::{
     AuthoringError, BundleDocument, BundleSpec, DescriptionTooLong, FrontmatterTooLarge,
     ScaffoldOptions, ScaffoldOutcome, check_frontmatter_size, render_workflow_frontmatter,
-    render_workflow_md, scaffold_bundle, slugify, validate_description, validate_description_chars,
-    validate_display_name, yaml_scalar,
+    render_workflow_md, scaffold_bundle_in_scratch, slugify, validate_description,
+    validate_description_chars, validate_display_name, yaml_scalar,
 };
-pub use bundle::{BundledFile, BundledSkill, InstallReport, install, is_current_materialization};
+pub use bundle::{BundledFile, BundledSkill};
 pub use catalog::{
     CatalogEntry, CatalogError, SkillsShRef, TreeMiss, catalog_entry_id, clawhub_download_url,
     closest_entry_ids, derive_download_url, download_url_from_docs_path,
@@ -65,11 +65,10 @@ pub use document::{inventory_resources, parse_skill, parse_skill_str, read_docum
 pub use file_run_log_store::FileRunLogStore;
 pub use flat::{FlatError, FlatSkill, parse_flat, render_flat, split_frontmatter};
 pub use install::{
-    DocumentError, DocumentWrite, FetchedDocument, InstallError, MAX_INSTALL_DOCUMENT_BYTES,
-    MAX_INSTALL_URL_LEN, WriteError, check_document_size, derive_install_slug,
-    is_loopback_http_url, is_private_or_local_host, normalize_install_url, redact_url,
-    validate_fetched_document, validate_install_url, validate_resolved_host,
-    write_installed_document,
+    DocumentError, FetchedDocument, InstallError, MAX_INSTALL_DOCUMENT_BYTES, MAX_INSTALL_URL_LEN,
+    check_document_size, derive_install_slug, is_loopback_http_url, is_private_or_local_host,
+    normalize_install_url, redact_url, validate_fetched_document, validate_install_url,
+    validate_resolved_host,
 };
 pub use layout::{
     ALL_ROOT_KINDS, LayoutQuery, RootKind, WORKFLOW_ROOT_KINDS, discover_layout,
@@ -98,7 +97,6 @@ pub use registry::{
     TransportResponse, Validators, fetch_skill_document, is_registry_contract_compatible,
     normalize_registry_document_url,
 };
-pub use remove::{RemoveError, remove_bundle};
 pub use resource::{ResourceError, read_resource, resolve_skill};
 pub use run_log_store::{
     MAX_RUN_LOG_TAIL_BYTES, RunCursor, RunLogError, RunLogFuture, RunLogPage, RunLogStart,
@@ -115,6 +113,10 @@ pub use scan_gate::{
 };
 pub use search::{MAX_DESCRIPTION, SkillHit, project, rank};
 pub use slug::{PunctuationRule, SlugError, SlugRules, slugify_with, validate_slug};
+pub use store_ops::{
+    BundleOperationError, PublishedBundle, install_compiled_in_store, install_document_in_store,
+    remove_bundle_from_store, scaffold_bundle_in_store,
+};
 pub use trigger::TriggerPattern;
 
 /// Re-exported so a host opens the directory handles [`materialize_tree`] takes

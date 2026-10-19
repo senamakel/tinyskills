@@ -119,17 +119,7 @@ impl DocumentBundleStore {
                 return Err(BundleStoreError::Corrupt);
             }
         }
-        let max_file_bytes = head.manifest.iter().try_fold(0usize, |max, entry| {
-            usize::try_from(entry.bytes)
-                .map(|bytes| max.max(bytes))
-                .map_err(|_| BundleStoreError::Corrupt)
-        })?;
-        let max_path_bytes = head
-            .manifest
-            .iter()
-            .map(|entry| entry.path.len())
-            .max()
-            .unwrap_or(0);
+        let limits = bundle_limits(head, expected_total)?;
         let mut files = Vec::with_capacity(listed.len());
         for (meta, expected) in listed.into_iter().zip(&head.manifest) {
             let blob = self
@@ -168,18 +158,8 @@ impl DocumentBundleStore {
             .into_iter()
             .filter(|file| file.path != primary_file)
             .collect();
-        let content = UserBundle::new(
-            primary,
-            document,
-            resources,
-            BundleLimits {
-                max_files: head.manifest.len(),
-                max_file_bytes,
-                max_total_bytes: expected_total,
-                max_path_bytes,
-            },
-        )
-        .map_err(|_| BundleStoreError::Corrupt)?;
+        let content = UserBundle::new(primary, document, resources, limits)
+            .map_err(|_| BundleStoreError::Corrupt)?;
         if content.digest() != head.digest {
             return Err(BundleStoreError::Corrupt);
         }
@@ -248,6 +228,33 @@ impl DocumentBundleStore {
         }
         Ok(generation)
     }
+}
+
+fn bundle_limits(head: &Head, expected_total: usize) -> Result<BundleLimits, BundleStoreError> {
+    let max_file_bytes = head.manifest.iter().try_fold(0usize, |max, entry| {
+        usize::try_from(entry.bytes)
+            .map(|bytes| max.max(bytes))
+            .map_err(|_| BundleStoreError::Corrupt)
+    })?;
+    let max_path_bytes = head
+        .manifest
+        .iter()
+        .map(|entry| entry.path.len())
+        .max()
+        .unwrap_or(0);
+    let max_depth = head
+        .manifest
+        .iter()
+        .map(|entry| entry.path.split('/').count())
+        .max()
+        .unwrap_or(0);
+    Ok(BundleLimits {
+        max_files: head.manifest.len(),
+        max_file_bytes,
+        max_total_bytes: expected_total,
+        max_path_bytes,
+        max_depth,
+    })
 }
 
 fn backend(error: StorageError) -> BundleStoreError {

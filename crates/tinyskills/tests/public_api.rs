@@ -111,29 +111,6 @@ fn inventory_and_reads_ignore_symlinks() -> Result<(), Box<dyn std::error::Error
 }
 
 #[test]
-fn bundled_materialization_replaces_tampered_content() -> Result<(), Box<dyn std::error::Error>> {
-    static FILES: &[BundledFile] = &[BundledFile {
-        path: "SKILL.md",
-        contents: "---\nname: demo\ndescription: bundled\n---\n",
-    }];
-    let bundle = BundledSkill {
-        dir_name: "demo",
-        files: FILES,
-    };
-    let temp = tempfile::tempdir()?;
-    let first = tinyskills::install(temp.path(), &[bundle]);
-    assert_eq!(first.written, ["demo"]);
-    fs::write(temp.path().join("demo/SKILL.md"), "tampered")?;
-    let second = tinyskills::install(temp.path(), &[bundle]);
-    assert_eq!(second.written, ["demo"]);
-    assert!(tinyskills::is_current_materialization(
-        &temp.path().join("demo"),
-        bundle
-    ));
-    Ok(())
-}
-
-#[test]
 fn a_rendered_document_digest_is_a_stable_pin() -> Result<(), Box<dyn std::error::Error>> {
     let source = "---\nname: Web Research\ndescription: Answer a question\nversion: 1.0.0\n---\n# Web Research\n";
     let rendered = render_flat(&parse_flat(source)?);
