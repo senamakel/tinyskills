@@ -133,3 +133,22 @@ async fn malformed_stream_records_fail_closed_in_every_read_operation() {
         Err(RunLogError::Backend(_))
     ));
 }
+
+#[tokio::test]
+async fn listing_rejects_a_valid_text_record_instead_of_a_checkpoint() {
+    let store = store("tenant-a");
+    let stream = StreamRunLogStore::stream_name("run-missing-checkpoint").unwrap();
+    store
+        .streams
+        .append(
+            &stream,
+            serde_json::json!({"kind": "text", "text": "orphan"}),
+        )
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        store.list(None, 10).await,
+        Err(RunLogError::Backend(_))
+    ));
+}
