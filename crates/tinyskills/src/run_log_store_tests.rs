@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::FileRunLogStore;
+use std::path::PathBuf;
 
 static INPUTS: std::sync::LazyLock<serde_json::Value> =
     std::sync::LazyLock::new(|| serde_json::json!({"note": "café"}));

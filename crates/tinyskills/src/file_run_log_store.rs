@@ -284,11 +284,10 @@ fn file_store_path(
 }
 
 fn hex(bytes: &[u8]) -> String {
-    use std::fmt::Write as _;
-
     let mut encoded = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
-        write!(&mut encoded, "{byte:02x}").expect("writing to a String cannot fail");
+        encoded.push(char::from(b"0123456789abcdef"[(byte >> 4) as usize]));
+        encoded.push(char::from(b"0123456789abcdef"[(byte & 0x0f) as usize]));
     }
     encoded
 }
