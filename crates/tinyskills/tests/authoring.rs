@@ -325,6 +325,31 @@ fn edit_refuses_symlinks_in_read_only_legacy_sources() -> Result<(), Box<dyn std
 
 #[cfg(unix)]
 #[test]
+fn edit_refuses_non_file_entries_in_read_only_legacy_sources()
+-> Result<(), Box<dyn std::error::Error>> {
+    let temp = tempfile::tempdir()?;
+    let legacy = temp.path().join("legacy");
+    let dir = legacy.join("old-one");
+    fs::create_dir_all(&dir)?;
+    fs::write(
+        dir.join("SKILL.md"),
+        "---\nname: old-one\ndescription: d\n---\nbody\n",
+    )?;
+    let _socket = std::os::unix::net::UnixListener::bind(dir.join("socket"))?;
+    let options = ScaffoldOptions {
+        overwrite: true,
+        legacy_roots: vec![legacy],
+        ..ScaffoldOptions::default()
+    };
+    let result =
+        scaffold_bundle_in_scratch(&temp.path().join("primary"), &spec("old-one"), &options);
+    assert!(matches!(result, Err(AuthoringError::Io { .. })));
+    assert!(!temp.path().join("primary/old-one").exists());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
 fn scaffold_refuses_a_symlinked_bundle_dir() -> Result<(), Box<dyn std::error::Error>> {
     let temp = tempfile::tempdir()?;
     let outside = tempfile::tempdir()?;
