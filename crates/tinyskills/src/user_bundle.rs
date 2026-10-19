@@ -219,6 +219,10 @@ fn portable_segment(segment: &str) -> bool {
         })
 }
 
+pub(crate) fn is_portable_bundle_path(path: &str) -> bool {
+    !path.is_empty() && path.split('/').all(portable_segment)
+}
+
 fn hex(digest: &[u8]) -> String {
     let mut result = String::with_capacity(digest.len() * 2);
     for byte in digest {

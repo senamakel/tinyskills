@@ -356,6 +356,9 @@ fn walk_bundle_files(
                     .to_str()
                     .ok_or(crate::BundleContentError::InvalidPath)?
                     .replace('\\', "/");
+                if !crate::user_bundle::is_portable_bundle_path(&name) {
+                    return Err(crate::BundleContentError::InvalidPath.into());
+                }
                 output.push((entry_path, name, metadata.len()));
             }
         }
@@ -384,14 +387,21 @@ fn read_bundle_dir(
         let allowed = limits.max_total_bytes.saturating_sub(total);
         let limit = limits.max_file_bytes.min(allowed);
         if size > limit as u64 {
-            return Err(crate::BundleContentError::Limit(if allowed < limits.max_file_bytes {
-                "total bytes"
-            } else {
-                "file bytes"
-            })
-            .into());
+            return Err(
+                crate::BundleContentError::Limit(if allowed < limits.max_file_bytes {
+                    "total bytes"
+                } else {
+                    "file bytes"
+                })
+                .into(),
+            );
         }
-        let bytes = read_bounded(&path, limit)?;
+        let limit_name = if allowed < limits.max_file_bytes {
+            "total bytes"
+        } else {
+            "file bytes"
+        };
+        let bytes = read_bounded(&path, limit, limit_name)?;
         total = total
             .checked_add(bytes.len())
             .ok_or(crate::BundleContentError::Limit("total bytes"))?;
@@ -409,13 +419,17 @@ fn read_bundle_dir(
     )?)
 }
 
-fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>, BundleOperationError> {
+fn read_bounded(
+    path: &Path,
+    limit: usize,
+    limit_name: &'static str,
+) -> Result<Vec<u8>, BundleOperationError> {
     let file = fs::File::open(path)?;
     let cap = u64::try_from(limit).unwrap_or(u64::MAX).saturating_add(1);
     let mut bytes = Vec::new();
     file.take(cap).read_to_end(&mut bytes)?;
     if bytes.len() > limit {
-        return Err(crate::BundleContentError::Limit("file bytes").into());
+        return Err(crate::BundleContentError::Limit(limit_name).into());
     }
     Ok(bytes)
 }
@@ -448,4 +462,3 @@ fn find_legacy_bundle(
     }
     Ok(None)
 }
-
