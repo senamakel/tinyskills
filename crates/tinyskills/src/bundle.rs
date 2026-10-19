@@ -42,7 +42,7 @@ impl BundledSkill {
         hex
     }
 
-    /// Validate that materializing this bundle cannot escape its destination.
+    /// Validate that bundle identifiers and relative paths are portable.
     ///
     /// # Errors
     ///
@@ -100,4 +100,3 @@ fn validate_relative_path(dir_name: &str, path: &str) -> Result<(), String> {
     }
     Ok(())
 }
-

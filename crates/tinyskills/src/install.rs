@@ -464,4 +464,3 @@ pub fn redact_url(raw: &str) -> String {
         Err(_) => "<unparseable>".to_owned(),
     }
 }
-

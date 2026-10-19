@@ -157,7 +157,7 @@ pub async fn install_compiled_in_store<S: BundleStore + ?Sized>(
                     bytes: file.contents.as_bytes().to_vec(),
                 })
                 .collect();
-            let content = UserBundle::new(primary, document, resources, BundleLimits::default())?;
+            let content = bundle_with_exact_limits(primary, document, resources)?;
             if let Some(existing) = store.read(bundle.dir_name).await? {
                 if existing.content.digest() == content.digest() {
                     return Ok(PublishedBundle {
@@ -221,11 +221,38 @@ fn read_staged_bundle(
             bytes: fs::read(entry)?,
         });
     }
+    Ok(bundle_with_exact_limits(primary, document, resources)?)
+}
+
+fn bundle_with_exact_limits(
+    primary: BundleDocument,
+    document: String,
+    resources: Vec<BundleFile>,
+) -> Result<UserBundle, crate::BundleContentError> {
+    let file_count = resources
+        .len()
+        .checked_add(1)
+        .ok_or(crate::BundleContentError::Limit("file count"))?;
+    let mut total = document.len();
+    let mut max_file = document.len();
+    let mut max_path = primary.file_name().len();
+    for file in &resources {
+        total = total
+            .checked_add(file.bytes.len())
+            .ok_or(crate::BundleContentError::Limit("total bytes"))?;
+        max_file = max_file.max(file.bytes.len());
+        max_path = max_path.max(file.path.len());
+    }
     Ok(UserBundle::new(
         primary,
         document,
         resources,
-        BundleLimits::default(),
+        BundleLimits {
+            max_files: file_count,
+            max_file_bytes: max_file,
+            max_total_bytes: total,
+            max_path_bytes: max_path,
+        },
     )?)
 }
 

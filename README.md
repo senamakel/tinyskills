@@ -31,7 +31,7 @@ for skill in skills {
 - recursive, deterministic scans that reject symlinked directories/manifests
 - explicit scope precedence for builtin, legacy, user, project, and profile roots
 - traversal-, symlink-, size-, and UTF-8-safe resource reads
-- validated materialization and tamper detection for compile-time bundles
+- validated compile-time bundle content for store publication
 - network-free registry catalog logic: Hermes catalog parsing, `SKILL.md` download-URL derivation (GitHub, ClawHub, skills.sh), entry lookup, and search filtering
 - opt-in collision policies (`CollisionPolicy`, `TieBreak::LastWins`, excluded scopes) so root order can decide equal-scope ties
 - store-backed authoring: `scaffold_bundle_in_store` stages in a caller-owned temporary directory, reads the store as the edit source of truth, and publishes with an expected revision; legacy roots are read-only import sources

@@ -550,7 +550,8 @@ fn copy_tree(source: &Path, destination: &Path) -> Result<(), AuthoringError> {
     for entry in std::fs::read_dir(source)
         .map_err(|error| io_error("failed to read legacy bundle", source, error))?
     {
-        let entry = entry.map_err(|error| io_error("failed to read legacy bundle", source, error))?;
+        let entry =
+            entry.map_err(|error| io_error("failed to read legacy bundle", source, error))?;
         let path = entry.path();
         let metadata = std::fs::symlink_metadata(&path)
             .map_err(|error| io_error("failed to inspect legacy entry", &path, error))?;

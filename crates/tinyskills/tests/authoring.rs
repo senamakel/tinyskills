@@ -6,8 +6,8 @@ use tinyskills::{
     AuthoringError, BundleDocument, BundleSpec, DescriptionTooLong, FrontmatterTooLarge,
     MAX_DESCRIPTION_LEN, MAX_NAME_LEN, PunctuationRule, ScaffoldOptions, SlugError, SlugRules,
     check_frontmatter_size, parse_skill_str, render_workflow_frontmatter, render_workflow_md,
-    scaffold_bundle_in_scratch, slugify, slugify_with, validate_description, validate_description_chars,
-    validate_display_name, validate_slug, yaml_scalar,
+    scaffold_bundle_in_scratch, slugify, slugify_with, validate_description,
+    validate_description_chars, validate_display_name, validate_slug, yaml_scalar,
 };
 
 fn spec(slug: &str) -> BundleSpec {
@@ -160,9 +160,10 @@ fn scaffold_rejects_collisions_and_missing_edit_targets() -> Result<(), Box<dyn 
 fn scaffold_rejects_unsafe_slugs_and_bad_descriptions() -> Result<(), Box<dyn std::error::Error>> {
     let temp = tempfile::tempdir()?;
     for slug in ["", ".", "..", "../x", "a/b", "a\\b", "/abs"] {
-        let error = scaffold_bundle_in_scratch(temp.path(), &spec(slug), &ScaffoldOptions::default())
-            .err()
-            .ok_or("unsafe slug accepted")?;
+        let error =
+            scaffold_bundle_in_scratch(temp.path(), &spec(slug), &ScaffoldOptions::default())
+                .err()
+                .ok_or("unsafe slug accepted")?;
         assert!(
             matches!(error, AuthoringError::InvalidSlug { .. }),
             "{slug}"
@@ -271,10 +272,17 @@ fn edit_finds_bundles_under_legacy_roots() -> Result<(), Box<dyn std::error::Err
         legacy_roots: vec![legacy.clone()],
         ..ScaffoldOptions::default()
     };
-    let outcome = scaffold_bundle_in_scratch(&temp.path().join("primary"), &spec("old-one"), &options)?;
-    assert_eq!(outcome.dir, fs::canonicalize(temp.path().join("primary/old-one"))?);
+    let outcome =
+        scaffold_bundle_in_scratch(&temp.path().join("primary"), &spec("old-one"), &options)?;
+    assert_eq!(
+        outcome.dir,
+        fs::canonicalize(temp.path().join("primary/old-one"))?
+    );
     assert!(outcome.document.ends_with("old-one/WORKFLOW.md"));
-    assert!(dir.join("SKILL.md").is_file(), "legacy source remains untouched");
+    assert!(
+        dir.join("SKILL.md").is_file(),
+        "legacy source remains untouched"
+    );
     assert!(outcome.dir.join("WORKFLOW.md").is_file());
     Ok(())
 }

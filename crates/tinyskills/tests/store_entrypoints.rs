@@ -185,6 +185,12 @@ async fn fetched_install_and_remove_use_store_revisions() {
             .unwrap(),
         BundleRevision(2)
     );
+    assert!(matches!(
+        remove_bundle_from_store(&store, "new-skill", installed.revision).await,
+        Err(tinyskills::BundleOperationError::Store(
+            BundleStoreError::Conflict { current: None }
+        ))
+    ));
     assert!(store.read("new-skill").await.unwrap().is_none());
 }
 
@@ -321,14 +327,11 @@ async fn store_refusal_stops_authoring_before_staging_anything() {
         description: "new".into(),
         ..BundleSpec::default()
     };
-    let result = scaffold_bundle_in_store(
-        &store,
-        temp.path(),
-        &spec,
-        &Default::default(),
-        None,
-    )
-    .await;
-    assert!(matches!(result, Err(tinyskills::BundleOperationError::Store(_))));
+    let result =
+        scaffold_bundle_in_store(&store, temp.path(), &spec, &Default::default(), None).await;
+    assert!(matches!(
+        result,
+        Err(tinyskills::BundleOperationError::Store(_))
+    ));
     assert!(!temp.path().join("demo").exists());
 }

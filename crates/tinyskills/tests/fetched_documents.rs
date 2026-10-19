@@ -86,4 +86,3 @@ fn invalid_documents_are_rejected_with_core_compatible_messages() {
         );
     }
 }
-
