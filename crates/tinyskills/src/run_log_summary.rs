@@ -34,6 +34,8 @@ pub struct RunLogSummary {
 ///
 /// Returns an error when the log cannot be opened or read.
 pub fn read_run_log_summary(path: &Path) -> std::io::Result<Option<RunLogSummary>> {
+    const CHUNK_SIZE: usize = 8192;
+    const MAX_LINE_SIZE: usize = 8192;
     #[cfg(test)]
     {
         let mut counts = FULL_FILE_SUMMARY_PARSE_COUNTS
@@ -41,8 +43,6 @@ pub fn read_run_log_summary(path: &Path) -> std::io::Result<Option<RunLogSummary
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         *counts.entry(path.to_path_buf()).or_default() += 1;
     }
-    const CHUNK_SIZE: usize = 8192;
-    const MAX_LINE_SIZE: usize = 8192;
     let mut reader = BufReader::new(std::fs::File::open(path)?);
     let mut chunk = [0; CHUNK_SIZE];
     let mut line = Vec::with_capacity(256);
