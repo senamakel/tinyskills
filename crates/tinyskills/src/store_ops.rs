@@ -53,6 +53,8 @@ pub async fn scaffold_bundle_in_store<S: BundleStore + ?Sized>(
     options: &ScaffoldOptions,
     expected: Option<BundleRevision>,
 ) -> Result<PublishedBundle, BundleOperationError> {
+    crate::authoring::validate_slug(&spec.slug)?;
+    crate::validate_description(&spec.description)?;
     let current = store.read(&spec.slug).await?;
     if current.as_ref().map(|stored| stored.revision) != expected {
         return Err(BundleOperationError::Store(BundleStoreError::Conflict {
@@ -189,6 +191,7 @@ pub async fn remove_bundle_from_store<S: BundleStore + ?Sized>(
     id: &str,
     expected: BundleRevision,
 ) -> Result<BundleRevision, BundleOperationError> {
+    crate::authoring::validate_slug(id)?;
     Ok(store.delete(id, expected).await?)
 }
 
@@ -281,7 +284,14 @@ fn find_legacy_bundle(
     id: &str,
 ) -> std::io::Result<Option<std::path::PathBuf>> {
     for root in roots {
-        let candidate = root.join(id);
+        match fs::symlink_metadata(root) {
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+            Ok(_) => return Err(std::io::Error::other("legacy root is not a real directory")),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        }
+        let canonical_root = fs::canonicalize(root)?;
+        let candidate = canonical_root.join(id);
         match fs::symlink_metadata(&candidate) {
             Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => {
                 return Ok(Some(candidate));

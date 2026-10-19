@@ -522,7 +522,7 @@ pub fn scaffold_bundle_in_scratch(
     })
 }
 
-fn validate_slug(slug: &str) -> Result<(), AuthoringError> {
+pub(crate) fn validate_slug(slug: &str) -> Result<(), AuthoringError> {
     let mut components = Path::new(slug).components();
     let single = matches!(
         (components.next(), components.next()),
