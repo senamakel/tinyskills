@@ -327,7 +327,15 @@ fn edit_refuses_symlinks_in_read_only_legacy_sources() -> Result<(), Box<dyn std
 #[test]
 fn edit_refuses_non_file_entries_in_read_only_legacy_sources()
 -> Result<(), Box<dyn std::error::Error>> {
-    let temp = tempfile::tempdir()?;
+    // Linux's Unix-domain socket path limit is short enough that the hosted
+    // compiler scratch directory plus the fixture path can exceed it. Use
+    // shared memory when available; other Unix platforms keep their normal
+    // temporary directory, which has a shorter path.
+    let temp = if cfg!(target_os = "linux") && std::path::Path::new("/dev/shm").is_dir() {
+        tempfile::tempdir_in("/dev/shm")?
+    } else {
+        tempfile::tempdir()?
+    };
     let legacy = temp.path().join("legacy");
     let dir = legacy.join("old-one");
     fs::create_dir_all(&dir)?;
