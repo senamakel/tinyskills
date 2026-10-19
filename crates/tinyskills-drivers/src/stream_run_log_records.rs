@@ -69,7 +69,7 @@ pub(super) fn update_summary(summary: &mut run_log::RunLogSummary, text: &str) {
         };
         let value = value.trim();
         match label.trim() {
-            "status" => summary.run.status = value.to_owned(),
+            "status" => value.clone_into(&mut summary.run.status),
             "duration" => {
                 summary.run.duration_ms = value.trim_end_matches(" ms").trim().parse::<u64>().ok();
             }

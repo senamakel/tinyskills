@@ -4,6 +4,9 @@ use super::*;
 use serde_json::Value;
 use tinystoragedrivers_core::{MemoryStorage, Scope, StorageBackend, StreamEntry, StreamStore};
 
+#[path = "stream_run_log_race_tests.rs"]
+mod race_tests;
+
 #[derive(Debug, Default)]
 struct ReadMetrics {
     records: std::sync::atomic::AtomicUsize,
