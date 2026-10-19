@@ -220,6 +220,36 @@ async fn streams_create_append_list_tail_and_clear_runs() {
 }
 
 #[tokio::test]
+async fn stream_zero_byte_tail_does_not_advance_its_cursor() {
+    let store = store("tenant-a");
+    store
+        .start(run(
+            "workflow-a",
+            "run-zero-tail",
+            "2026-01-01T00:00:00Z",
+            "some text",
+        ))
+        .await
+        .unwrap();
+
+    let empty = store.tail("run-zero-tail", None, 0).await.unwrap();
+    assert!(empty.content.is_empty());
+    assert!(!empty.eof);
+    let repeated = store
+        .tail("run-zero-tail", Some(&empty.cursor), 0)
+        .await
+        .unwrap();
+    assert!(repeated.content.is_empty());
+    assert_eq!(repeated.cursor, empty.cursor);
+
+    let next = store
+        .tail("run-zero-tail", Some(&empty.cursor), 64)
+        .await
+        .unwrap();
+    assert!(next.content.contains("some text"));
+}
+
+#[tokio::test]
 async fn stream_cursors_reject_other_runs_scopes_and_recreated_runs() {
     let storage = MemoryStorage::new();
     let scope_a = storage.for_scope(&Scope::new("tenant-a").unwrap()).unwrap();

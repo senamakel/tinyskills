@@ -109,6 +109,37 @@ async fn file_store_starts_appends_lists_tails_and_clears_runs() {
 }
 
 #[tokio::test]
+async fn file_store_zero_byte_tail_does_not_advance_its_cursor() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let store = FileRunLogStore::new(temp.path());
+    store
+        .start(start(
+            "workflow-a",
+            "run-zero-tail",
+            "2026-01-01T00:00:00Z",
+            "some text",
+        ))
+        .await
+        .unwrap();
+
+    let empty = store.tail("run-zero-tail", None, 0).await.unwrap();
+    assert!(empty.content.is_empty());
+    assert!(!empty.eof);
+    let repeated = store
+        .tail("run-zero-tail", Some(&empty.cursor), 0)
+        .await
+        .unwrap();
+    assert!(repeated.content.is_empty());
+    assert_eq!(repeated.cursor, empty.cursor);
+
+    let next = store
+        .tail("run-zero-tail", Some(&empty.cursor), 64)
+        .await
+        .unwrap();
+    assert!(next.content.contains("some text"));
+}
+
+#[tokio::test]
 async fn file_store_rejects_bad_ids_missing_runs_and_stale_cursors() {
     let temp = tempfile::TempDir::new().unwrap();
     let store = FileRunLogStore::new(temp.path());
