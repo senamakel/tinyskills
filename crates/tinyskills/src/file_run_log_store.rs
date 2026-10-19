@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use super::{
@@ -81,6 +82,19 @@ impl RunLogStore for FileRunLogStore {
             let path_for_task = path.clone();
             let workspace = self.workspace.clone();
             let run_id = run.run_id.to_owned();
+            let summary = run_log::RunLogSummary {
+                run: ScannedRun {
+                    run_id: run.run_id.to_owned(),
+                    workflow_id: run.workflow_id.to_owned(),
+                    started: format!("{} UTC", run.started),
+                    status: "RUNNING".to_string(),
+                    duration_ms: None,
+                    finished: None,
+                    log_path: path.to_string_lossy().into_owned(),
+                },
+                complete: false,
+                footer_started: false,
+            };
             tokio::task::spawn_blocking(move || {
                 let parent = path_for_task.parent().ok_or_else(|| {
                     io::Error::new(
@@ -111,6 +125,9 @@ impl RunLogStore for FileRunLogStore {
                     file.write_all(b"\n")?;
                     file.flush()
                 })();
+                if result.is_ok() {
+                    write_file_summary(&path_for_task, &summary)?;
+                }
                 drop(marker_file);
                 if result.is_err() {
                     let _ = std::fs::remove_file(&path_for_task);
@@ -139,6 +156,7 @@ impl RunLogStore for FileRunLogStore {
                     file.write_all(b"\n")?;
                 }
                 file.flush()
+                    .and_then(|()| update_file_summary(&path, &line))
             })
             .await
             .map_err(|error| RunLogError::Task(error.to_string()))??;
@@ -185,7 +203,11 @@ impl RunLogStore for FileRunLogStore {
                         "cursor is past end of run log",
                     ));
                 }
-                run_log::read_run_log_slice(&path, position, max_bytes)
+                let mut slice = run_log::read_run_log_slice(&path, position, max_bytes)?;
+                if let Some(summary) = read_file_summary(&path)? {
+                    slice.complete = summary.complete;
+                }
+                Ok::<_, io::Error>(slice)
             })
             .await
             .map_err(|error| RunLogError::Task(error.to_string()))
@@ -219,7 +241,7 @@ impl RunLogStore for FileRunLogStore {
             let workspace = self.workspace.clone();
             let workflow_id = workflow_id.map(str::to_owned);
             tokio::task::spawn_blocking(move || {
-                run_log::scan_runs(&workspace, workflow_id.as_deref(), limit)
+                scan_file_runs(&workspace, workflow_id.as_deref(), limit)
             })
             .await
             .map_err(|error| RunLogError::Task(error.to_string()))
@@ -236,6 +258,7 @@ impl RunLogStore for FileRunLogStore {
                     return Ok::<bool, io::Error>(false);
                 };
                 std::fs::remove_file(&path)?;
+                let _ = std::fs::remove_file(summary_path(&path));
                 let _ = std::fs::remove_file(generation_path(&path));
                 let _ = std::fs::remove_file(lock_path(&workspace, &run_id));
                 Ok(true)
@@ -248,19 +271,124 @@ impl RunLogStore for FileRunLogStore {
 }
 
 fn exact_file_path(workspace: &std::path::Path, run_id: &str) -> Option<PathBuf> {
-    std::fs::read_dir(run_log::runs_dir(workspace))
-        .ok()?
-        .flatten()
-        .map(|entry| entry.path())
-        .find(|path| {
-            if path.extension().and_then(|extension| extension.to_str()) != Some("log") {
-                return false;
+    let entries = std::fs::read_dir(run_log::runs_dir(workspace)).ok()?;
+    let encoded_suffix = format!("_{}.log", hex(run_id.as_bytes()));
+    let legacy_suffix = format!("_{}.log", run_log::sanitize(run_log::short(run_id)));
+    let mut legacy = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if path.extension().and_then(|extension| extension.to_str()) != Some("log") {
+            continue;
+        }
+        if name.ends_with(&encoded_suffix) {
+            return Some(path);
+        }
+        if name.ends_with(&legacy_suffix) {
+            legacy.push(path);
+        }
+    }
+    legacy.into_iter().find(|path| {
+        run_log::read_run_log_summary(path)
+            .ok()
+            .flatten()
+            .is_some_and(|summary| summary.run.run_id == run_id)
+    })
+}
+
+#[derive(Serialize, Deserialize)]
+struct FileSummary {
+    summary: run_log::RunLogSummary,
+}
+
+fn summary_path(path: &Path) -> PathBuf {
+    path.with_extension("summary.json")
+}
+
+fn read_file_summary(path: &Path) -> io::Result<Option<run_log::RunLogSummary>> {
+    match std::fs::read(summary_path(path)) {
+        Ok(bytes) => serde_json::from_slice::<FileSummary>(&bytes)
+            .map(|summary| Some(summary.summary))
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn write_file_summary(path: &Path, summary: &run_log::RunLogSummary) -> io::Result<()> {
+    let destination = summary_path(path);
+    let temporary = path.with_extension(format!("summary-{}.tmp", new_generation()));
+    let bytes = serde_json::to_vec(&FileSummary {
+        summary: summary.clone(),
+    })
+    .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    std::fs::write(&temporary, bytes)?;
+    if let Err(error) = std::fs::rename(&temporary, &destination) {
+        let _ = std::fs::remove_file(temporary);
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn update_file_summary(path: &Path, appended: &str) -> io::Result<()> {
+    let Some(mut summary) = read_file_summary(path)? else {
+        return Ok(());
+    };
+    for line in appended.lines() {
+        if line.starts_with("--- result ---") {
+            summary.footer_started = true;
+            continue;
+        }
+        let Some((label, value)) = line.split_once(':') else {
+            continue;
+        };
+        if !summary.footer_started {
+            continue;
+        }
+        let value = value.trim();
+        match label.trim() {
+            "status" => summary.run.status = value.to_string(),
+            "duration" => {
+                summary.run.duration_ms = value.trim_end_matches(" ms").trim().parse::<u64>().ok();
             }
-            std::fs::read_to_string(path)
-                .ok()
-                .and_then(|text| run_log::parse_run_log_text(&text, "").map(|run| run.run_id))
-                .is_some_and(|candidate| candidate == run_id)
-        })
+            "finished" => {
+                summary.run.finished = Some(value.trim_end_matches(" UTC").trim().to_string());
+                summary.complete = !summary.run.status.is_empty();
+            }
+            _ => {}
+        }
+    }
+    write_file_summary(path, &summary)
+}
+
+fn scan_file_runs(workspace: &Path, workflow_id: Option<&str>, limit: usize) -> Vec<ScannedRun> {
+    let mut runs = Vec::new();
+    let Ok(entries) = std::fs::read_dir(run_log::runs_dir(workspace)) else {
+        return runs;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|extension| extension.to_str()) != Some("log") {
+            continue;
+        }
+        let summary = match read_file_summary(&path) {
+            Ok(Some(summary)) => Some(summary),
+            Ok(None) => run_log::read_run_log_summary(&path).ok().flatten(),
+            Err(_) => None,
+        };
+        let Some(mut summary) = summary else {
+            continue;
+        };
+        if workflow_id.is_none_or(|workflow| summary.run.workflow_id == workflow) {
+            summary.run.log_path = path.to_string_lossy().into_owned();
+            runs.push(summary.run);
+        }
+    }
+    runs.sort_by(|left, right| right.started.cmp(&left.started));
+    runs.truncate(limit);
+    runs
 }
 
 fn lock_path(workspace: &std::path::Path, run_id: &str) -> PathBuf {
