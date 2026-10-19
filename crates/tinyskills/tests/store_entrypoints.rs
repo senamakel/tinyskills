@@ -1,4 +1,10 @@
-use std::{collections::BTreeMap, sync::Mutex};
+use std::{
+    collections::BTreeMap,
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use tinyskills::{
     BundleDocument, BundleFuture, BundleLimits, BundleRevision, BundleSpec, BundleStore,
@@ -8,11 +14,21 @@ use tinyskills::{
 };
 
 #[derive(Default)]
-struct MemoryStore(Mutex<BTreeMap<String, StoredBundle>>);
+struct MemoryStore {
+    rows: Mutex<BTreeMap<String, StoredBundle>>,
+    fail_reads: AtomicBool,
+}
 
 impl BundleStore for MemoryStore {
     fn read<'a>(&'a self, id: &'a str) -> BundleFuture<'a, Option<StoredBundle>> {
-        Box::pin(async move { Ok(self.0.lock().map_err(poison)?.get(id).cloned()) })
+        Box::pin(async move {
+            if self.fail_reads.load(Ordering::SeqCst) {
+                return Err(BundleStoreError::Backend(Box::new(std::io::Error::other(
+                    "injected read refusal",
+                ))));
+            }
+            Ok(self.rows.lock().map_err(poison)?.get(id).cloned())
+        })
     }
     fn publish<'a>(
         &'a self,
@@ -21,7 +37,7 @@ impl BundleStore for MemoryStore {
         content: &'a UserBundle,
     ) -> BundleFuture<'a, BundleRevision> {
         Box::pin(async move {
-            let mut rows = self.0.lock().map_err(poison)?;
+            let mut rows = self.rows.lock().map_err(poison)?;
             let current = rows.get(id).map(|row| row.revision);
             if current != expected {
                 return Err(BundleStoreError::Conflict { current });
@@ -44,7 +60,7 @@ impl BundleStore for MemoryStore {
     ) -> BundleFuture<'a, Vec<BundleSummary>> {
         Box::pin(async move {
             Ok(self
-                .0
+                .rows
                 .lock()
                 .map_err(poison)?
                 .iter()
@@ -65,7 +81,7 @@ impl BundleStore for MemoryStore {
         expected: BundleRevision,
     ) -> BundleFuture<'a, BundleRevision> {
         Box::pin(async move {
-            let mut rows = self.0.lock().map_err(poison)?;
+            let mut rows = self.rows.lock().map_err(poison)?;
             let current = rows.get(id).map(|row| row.revision);
             if current != Some(expected) {
                 return Err(BundleStoreError::Conflict { current });
@@ -293,4 +309,26 @@ async fn compiled_install_publishes_files_and_does_not_replace_user_heads() {
         store.read("builtin").await.unwrap().unwrap().revision,
         BundleRevision(2)
     );
+}
+
+#[tokio::test]
+async fn store_refusal_stops_authoring_before_staging_anything() {
+    let store = MemoryStore::default();
+    store.fail_reads.store(true, Ordering::SeqCst);
+    let temp = tempfile::tempdir().unwrap();
+    let spec = BundleSpec {
+        slug: "demo".into(),
+        description: "new".into(),
+        ..BundleSpec::default()
+    };
+    let result = scaffold_bundle_in_store(
+        &store,
+        temp.path(),
+        &spec,
+        &Default::default(),
+        None,
+    )
+    .await;
+    assert!(matches!(result, Err(tinyskills::BundleOperationError::Store(_))));
+    assert!(!temp.path().join("demo").exists());
 }
