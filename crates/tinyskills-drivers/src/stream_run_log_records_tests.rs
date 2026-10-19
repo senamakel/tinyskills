@@ -1,6 +1,7 @@
 use super::*;
 
 #[test]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 fn text_records_keep_large_unicode_scalars_contiguous() {
     let text = format!("{}🙂tail", "x".repeat(RECORD_CHUNK_BYTES - 1));
     let records = text_records(&text).unwrap();
@@ -16,6 +17,7 @@ fn text_records_keep_large_unicode_scalars_contiguous() {
 }
 
 #[test]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 fn summary_updates_only_from_footer_and_tracks_completion_fields() {
     let path = "stream://test";
     let mut summary = run_log::read_run_log_summary_from_text(
@@ -44,6 +46,7 @@ fn summary_updates_only_from_footer_and_tracks_completion_fields() {
 }
 
 #[test]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 fn record_values_roundtrip_versioned_headers() {
     let record = StreamRecord::Header {
         schema: 1,
