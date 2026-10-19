@@ -1,8 +1,12 @@
 //! The file-backed implementation of the run-log persistence contract.
 
 use std::io::{self, Read, Write};
+use std::collections::HashMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock, Mutex, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -13,6 +17,9 @@ use super::{
     RunLogStore,
 };
 use crate::run_log::{self, ScannedRun};
+
+static RUN_LIFECYCLE_LOCKS: LazyLock<Mutex<HashMap<PathBuf, Weak<Mutex<()>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// The existing `<workspace>/skills/.runs/*.log` layout behind [`RunLogStore`].
 #[derive(Debug, Clone)]
@@ -110,6 +117,10 @@ impl RunLogStore for FileRunLogStore {
                     )
                 })?;
                 std::fs::create_dir_all(parent)?;
+                let lifecycle_lock = run_lifecycle_lock(&path_for_task);
+                let _lifecycle_guard = lifecycle_lock
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 if exact_file_path(&workspace, &summary.run.run_id).is_some()
                     || path_for_task.exists()
                 {
@@ -131,6 +142,7 @@ impl RunLogStore for FileRunLogStore {
                     let _ = std::fs::remove_file(&path_for_task);
                     return Err(error);
                 }
+                drop(_lifecycle_guard);
                 let observed_len = u64::try_from(header.len())
                     .map_err(|_| io::Error::other("run log header length exceeds u64"))?
                     + 1;
@@ -158,12 +170,18 @@ impl RunLogStore for FileRunLogStore {
                 let path = exact_file_path(&workspace, &run_id)
                     .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "run log not found"))?;
                 let mut file = std::fs::OpenOptions::new().append(true).open(&path)?;
+                let pre_len = file.metadata()?.len();
+                let mut written = u64::try_from(line.len())
+                    .map_err(|_| io::Error::other("appended run-log line exceeds u64"))?;
                 file.write_all(line.as_bytes())?;
                 if !line.ends_with('\n') {
                     file.write_all(b"\n")?;
+                    written = written
+                        .checked_add(1)
+                        .ok_or_else(|| io::Error::other("appended run-log line length overflow"))?;
                 }
                 file.flush()
-                    .and_then(|()| update_file_summary(&path, &line))
+                    .and_then(|()| update_file_summary(&path, pre_len, written, &line))
             })
             .await
             .map_err(|error| RunLogError::Task(error.to_string()))??;
@@ -176,6 +194,16 @@ impl RunLogStore for FileRunLogStore {
         run_id: &'a str,
         cursor: Option<&'a RunCursor>,
         max_bytes: usize,
+    ) -> RunLogFuture<'a, RunLogPage> {
+        self.tail_with_interleave(run_id, cursor, max_bytes, Box::pin(std::future::ready(())))
+    }
+
+    fn tail_with_interleave<'a>(
+        &'a self,
+        run_id: &'a str,
+        cursor: Option<&'a RunCursor>,
+        max_bytes: usize,
+        before_read: Pin<Box<dyn Future<Output = ()> + Send + 'a>>,
     ) -> RunLogFuture<'a, RunLogPage> {
         Box::pin(async move {
             Self::validate_id(run_id)?;
@@ -202,6 +230,7 @@ impl RunLogStore for FileRunLogStore {
             if within != 0 {
                 return Err(RunLogError::InvalidCursor);
             }
+            before_read.await;
             let backend_for_task = backend.clone();
             let slice = tokio::task::spawn_blocking(move || {
                 if position > std::fs::metadata(&path)?.len() {
@@ -261,6 +290,11 @@ impl RunLogStore for FileRunLogStore {
             let workspace = self.workspace.clone();
             let run_id = run_id.to_owned();
             let existed = tokio::task::spawn_blocking(move || {
+                let path = file_store_path(&workspace, "", &run_id, "");
+                let lifecycle_lock = run_lifecycle_lock(&path);
+                let _lifecycle_guard = lifecycle_lock
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
                 let path = exact_file_path(&workspace, &run_id).or_else(|| {
                     let deterministic = file_store_path(&workspace, "", &run_id, "");
                     if !deterministic.exists() {
@@ -377,10 +411,23 @@ fn write_file_summary(
     Ok(())
 }
 
-fn update_file_summary(path: &Path, appended: &str) -> io::Result<()> {
+fn update_file_summary(path: &Path, pre_len: u64, written: u64, appended: &str) -> io::Result<()> {
     let observed_len = std::fs::metadata(path)?.len();
     let generation = file_generation(path)?;
-    let Some(mut summary) = read_file_summary(path)? else {
+    let cached = match std::fs::read(summary_path(path)) {
+        Ok(bytes) => serde_json::from_slice::<FileSummary>(&bytes).ok(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    }
+    .filter(|cached| {
+        cached.generation == generation
+            && cached.observed_len == pre_len
+            && pre_len.checked_add(written) == Some(observed_len)
+    });
+    let Some(mut summary) = (match cached {
+        Some(cached) => Some(cached.summary),
+        None => return read_file_summary(path).map(|_| ()),
+    }) else {
         return Ok(());
     };
     for line in appended.lines() {
@@ -505,10 +552,45 @@ fn generation_path(path: &Path) -> PathBuf {
     path.with_extension("generation")
 }
 
-fn cleanup_failed_start(path: &Path, _generation: &str) {
+fn cleanup_failed_start(path: &Path, generation: &str) {
+    cleanup_failed_start_with(path, generation, || {});
+}
+
+fn cleanup_failed_start_with(path: &Path, generation: &str, before_remove: impl FnOnce()) {
+    let lifecycle_lock = run_lifecycle_lock(path);
+    let _lifecycle_guard = lifecycle_lock
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if file_generation(path).ok().as_deref() != Some(generation) {
+        return;
+    }
+    before_remove();
     let _ = std::fs::remove_file(summary_path(path));
     let _ = std::fs::remove_file(generation_path(path));
     let _ = std::fs::remove_file(path);
+}
+
+fn run_lifecycle_lock(path: &Path) -> Arc<Mutex<()>> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let key = match (parent.canonicalize(), path.file_name()) {
+        (Ok(parent), Some(file_name)) => parent.join(file_name),
+        _ => path.to_path_buf(),
+    };
+    let mut locks = RUN_LIFECYCLE_LOCKS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(&key).and_then(Weak::upgrade) {
+        return lock;
+    }
+    let lock = Arc::new(Mutex::new(()));
+    locks.insert(key, Arc::downgrade(&lock));
+    lock
+}
+
+#[cfg(test)]
+fn run_lifecycle_lock_is_held(path: &Path) -> bool {
+    run_lifecycle_lock(path).try_lock().is_err()
 }
 
 pub(crate) fn new_generation() -> String {
