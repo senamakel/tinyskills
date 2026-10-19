@@ -476,7 +476,8 @@ async fn remove_rejects_an_unsafe_bundle_id_before_store_access()
 }
 
 #[tokio::test]
-async fn compiled_install_rejects_a_bundle_without_its_document() {
+async fn compiled_install_rejects_a_bundle_without_its_document()
+-> Result<(), Box<dyn std::error::Error>> {
     static FILES: &[BundledFile] = &[BundledFile {
         path: "references/info.md",
         contents: "resource",
@@ -492,6 +493,7 @@ async fn compiled_install_rejects_a_bundle_without_its_document() {
         Some(Err(tinyskills::BundleOperationError::InvalidCompiledBundle))
     ));
     assert!(store.rows.lock().map_err(poison)?.is_empty());
+    Ok(())
 }
 
 #[tokio::test]
