@@ -185,6 +185,42 @@ async fn failed_start_cleanup_preserves_a_replacement_run() {
 }
 
 #[tokio::test]
+async fn failed_start_cleanup_excludes_other_handles_until_removal_finishes() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let first_handle = FileRunLogStore::new(temp.path());
+    let second_handle = FileRunLogStore::new(temp.path());
+    let run = start();
+    let path = file_store_path(temp.path(), run.workflow_id, run.run_id, "");
+    first_handle.start(run.clone()).await.unwrap();
+    let generation = file_generation(&path).unwrap();
+    let (checked_tx, checked_rx) = std::sync::mpsc::channel();
+    let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+    let cleanup_path = path.clone();
+    let cleanup = std::thread::spawn(move || {
+        cleanup_failed_start_with(&cleanup_path, &generation, || {
+            checked_tx.send(()).unwrap();
+            resume_rx.recv().unwrap();
+        });
+    });
+
+    checked_rx.recv().unwrap();
+    let second_path = file_store_path(&second_handle.workspace, run.workflow_id, run.run_id, "");
+    assert!(run_lifecycle_lock_is_held(&second_path));
+    resume_tx.send(()).unwrap();
+    cleanup.join().unwrap();
+
+    assert!(!second_handle.clear(run.run_id).await.unwrap());
+    second_handle
+        .start(RunLogStart {
+            started: "2026-01-01T00:00:02Z",
+            ..run
+        })
+        .await
+        .unwrap();
+    assert!(path.exists());
+}
+
+#[tokio::test]
 async fn tail_never_reads_replacement_bytes_with_the_previous_generation_cursor() {
     let temp = tempfile::TempDir::new().unwrap();
     let first_handle = std::sync::Arc::new(FileRunLogStore::new(temp.path()));
