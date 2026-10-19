@@ -233,7 +233,7 @@ impl RunLogStore for FileRunLogStore {
             let run_id = run_id.to_owned();
             let existed = tokio::task::spawn_blocking(move || {
                 let Some(path) = exact_file_path(&workspace, &run_id) else {
-                    return Ok(false);
+                    return Ok::<bool, io::Error>(false);
                 };
                 std::fs::remove_file(&path)?;
                 let _ = std::fs::remove_file(generation_path(&path));
