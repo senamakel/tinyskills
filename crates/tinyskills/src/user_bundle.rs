@@ -54,6 +54,9 @@ pub enum BundleContentError {
     /// A file would also have to be a directory.
     #[error("bundle file conflicts with a parent directory")]
     PathConflict,
+    /// The bundle has neither of its recognized primary documents.
+    #[error("bundle is missing its primary document")]
+    MissingDocument,
     /// A requested limit was exceeded.
     #[error("bundle exceeds its {0} limit")]
     Limit(&'static str),

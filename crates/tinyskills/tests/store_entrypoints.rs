@@ -551,6 +551,7 @@ async fn stored_bundle_over_the_requested_budget_is_rejected_before_staging()
             max_file_bytes: default_limits.max_file_bytes + 1,
             max_total_bytes: default_limits.max_total_bytes,
             max_path_bytes: default_limits.max_path_bytes,
+            max_depth: default_limits.max_depth,
         },
     )
     .into_test_result()?;

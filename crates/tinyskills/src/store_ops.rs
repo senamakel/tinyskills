@@ -1,6 +1,10 @@
 //! Store-backed entrypoints for authored and installed bundles.
 
-use std::{fs, path::Path};
+use std::{
+    fs,
+    io::Read,
+    path::{Path, PathBuf},
+};
 
 use crate::{
     BundleDocument, BundleFile, BundleLimits, BundleRevision, BundleSpec, BundleStore,
@@ -59,6 +63,8 @@ pub async fn scaffold_bundle_in_store<S: BundleStore + ?Sized>(
     options: &ScaffoldOptions,
     expected: Option<BundleRevision>,
 ) -> Result<PublishedBundle, BundleOperationError> {
+    crate::authoring::validate_slug(&spec.slug)?;
+    crate::validate_description(&spec.description)?;
     let current = store.read(&spec.slug).await?;
     if current.as_ref().map(|stored| stored.revision) != expected {
         return Err(BundleOperationError::Store(BundleStoreError::Conflict {
@@ -77,20 +83,23 @@ pub async fn scaffold_bundle_in_store<S: BundleStore + ?Sized>(
         Err(error) => return Err(error.into()),
     }
     if let Some(stored) = &current {
-        write_staged_bundle(&stage, &stored.content)?;
+        let bounded = validate_stored_bundle(&stored.content, options.limits)?;
+        write_staged_bundle(&stage, &bounded)?;
     } else if options.overwrite
         && let Some(legacy) = find_legacy_bundle(&options.legacy_roots, &spec.slug)?
     {
-        copy_legacy_bundle(&legacy, &stage)?;
+        let imported = read_bundle_dir(&legacy, options.document, options.limits)?;
+        write_staged_bundle(&stage, &imported)?;
     }
 
     let stage_options = ScaffoldOptions {
         overwrite: stage.exists(),
         legacy_roots: Vec::new(),
         document: options.document,
+        limits: options.limits,
     };
     crate::scaffold_bundle_in_scratch(scratch_root, spec, &stage_options)?;
-    let content = read_staged_bundle(&stage, options.document)?;
+    let content = read_staged_bundle(&stage, options.document, options.limits)?;
     let revision = store.publish(&spec.slug, expected, &content).await?;
     Ok(PublishedBundle {
         id: spec.slug.clone(),

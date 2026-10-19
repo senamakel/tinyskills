@@ -220,6 +220,7 @@ fn length_delimiters_and_file_hashes_preserve_unambiguous_original_bytes() -> Te
             max_file_bytes: 0,
             max_total_bytes: 0,
             max_path_bytes: 8,
+            max_depth: BundleLimits::default().max_depth,
         },
     )?;
     assert_eq!(empty.file("SKILL.md"), Some(b"".as_slice()));
