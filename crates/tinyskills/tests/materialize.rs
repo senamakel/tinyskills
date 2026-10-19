@@ -155,7 +155,15 @@ fn symlinks_inside_a_bundle_are_skipped_not_followed() -> TestResult {
 #[cfg(unix)]
 #[test]
 fn non_regular_files_inside_a_bundle_are_not_copied() -> TestResult {
-    let temp = tempfile::tempdir()?;
+    // Linux's Unix-domain socket path limit is short enough that the hosted
+    // compiler scratch directory plus the fixture path can exceed it. Use
+    // shared memory when available; other Unix platforms keep their normal
+    // temporary directory, which has a shorter path.
+    let temp = if cfg!(target_os = "linux") && std::path::Path::new("/dev/shm").is_dir() {
+        tempfile::tempdir_in("/dev/shm")?
+    } else {
+        tempfile::tempdir()?
+    };
     let src = temp.path().join("bundle");
     fs::create_dir_all(&src)?;
     fs::write(src.join("SKILL.md"), DOC)?;
