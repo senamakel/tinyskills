@@ -358,7 +358,7 @@ async fn file_store_adopts_logs_written_by_legacy_helpers() {
     let store = FileRunLogStore::new(temp.path());
     let runs = store.list(Some("legacy-workflow"), 10).await.unwrap();
     assert_eq!(runs.len(), 1);
-    assert_eq!(runs[0].started, "2026-01-01T00:00:00Z");
+    assert_eq!(runs[0].started, "2026-01-01T00:00:00Z UTC");
     assert_eq!(runs[0].status, "DONE");
     assert_eq!(runs[0].duration_ms, Some(23));
     let page = store.tail("legacy-run-12345678", None, 4096).await.unwrap();
