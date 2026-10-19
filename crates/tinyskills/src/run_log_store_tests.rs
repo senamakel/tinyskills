@@ -175,8 +175,8 @@ async fn file_store_rejects_bad_ids_missing_runs_and_stale_cursors() {
 async fn file_store_rejects_ids_that_exceed_encoded_filename_limit() {
     let temp = tempfile::TempDir::new().unwrap();
     let store = FileRunLogStore::new(temp.path());
-    let workflow_id = "界".repeat(30);
-    let run_id = "界".repeat(30);
+    let workflow_id = "workflow";
+    let run_id = "界".repeat(50);
     assert!(matches!(
         store
             .start(start(
