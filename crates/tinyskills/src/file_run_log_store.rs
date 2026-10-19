@@ -271,7 +271,6 @@ fn tail_with_interleave<'a>(
         let max_bytes = max_bytes.min(MAX_RUN_LOG_TAIL_BYTES);
         let backend = store.backend();
         let workspace = store.workspace.clone();
-        let lifecycle_path = file_store_path(&workspace, "", run_id, "");
         let run_id = run_id.to_owned();
         if let Some(cursor) = cursor {
             cursor.validate_owner(&backend, &run_id)?;
@@ -294,25 +293,7 @@ fn tail_with_interleave<'a>(
         }
         before_read.await;
         let backend_for_task = backend.clone();
-        let expected_generation = generation.clone();
         let slice = tokio::task::spawn_blocking(move || {
-            let lifecycle_lock = run_lifecycle_lock(&lifecycle_path);
-            let _lifecycle_guard = lifecycle_lock
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            let current_generation = file_generation(&path).map_err(|error| {
-                if error.kind() == io::ErrorKind::NotFound {
-                    io::Error::new(io::ErrorKind::InvalidInput, "run generation changed")
-                } else {
-                    error
-                }
-            })?;
-            if current_generation != expected_generation {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "run generation changed",
-                ));
-            }
             if position > std::fs::metadata(&path)?.len() {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
