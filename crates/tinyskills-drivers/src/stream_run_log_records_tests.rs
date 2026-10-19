@@ -65,7 +65,7 @@ fn record_values_roundtrip_versioned_headers() {
 #[test]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 fn empty_chunks_and_footer_without_status_remain_incomplete() {
-    assert!(text_records("").unwrap().is_empty());
+    assert_eq!(text_records("").unwrap(), Vec::<serde_json::Value>::new());
     let mut summary = run_log::read_run_log_summary_from_text(
         &run_log::format_header(
             "workflow",
