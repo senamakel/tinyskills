@@ -134,7 +134,7 @@ async fn streams_create_append_list_tail_and_clear_runs() {
     let first = StreamRunLogStore::new(Arc::clone(scoped.streams()), "tenant-a").unwrap();
     let second_handle = StreamRunLogStore::new(Arc::clone(scoped.streams()), "tenant-a").unwrap();
 
-    assert!(first.list(None, 10).await.unwrap().is_empty());
+    assert_eq!(first.list(None, 10).await.unwrap().len(), 0);
     first
         .start(run(
             "workflow-a",
@@ -449,7 +449,7 @@ async fn stream_small_tail_reads_only_a_bounded_window_of_a_large_run() {
 
     metrics.reset();
     let page = store.tail("run-large-tail", None, 32).await.unwrap();
-    assert!(!page.content.is_empty());
+    assert_ne!(page.content, "");
     assert!(metrics.records.load(std::sync::atomic::Ordering::Relaxed) <= 4);
     assert!(metrics.bytes.load(std::sync::atomic::Ordering::Relaxed) <= 4096);
 }

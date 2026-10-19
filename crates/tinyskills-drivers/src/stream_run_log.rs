@@ -43,7 +43,6 @@ impl StreamRunLogStore {
     ///
     /// Returns [`RunLogError::InvalidId`] when `scope_id` is empty, too long,
     /// or contains control characters.
-    #[must_use]
     pub fn new(
         streams: Arc<dyn StreamStore>,
         scope_id: impl Into<String>,
@@ -78,7 +77,11 @@ impl StreamRunLogStore {
     }
 
     async fn read_all(&self, stream: &str) -> Result<String, RunLogError> {
-        let length = self.streams.len(stream).await.map_err(storage_error)?;
+        let length = self
+            .streams
+            .len(stream)
+            .await
+            .map_err(|error| storage_error(&error))?;
         let mut text = String::new();
         let mut from = 0;
         while from < length {
@@ -86,7 +89,7 @@ impl StreamRunLogStore {
                 .streams
                 .read_window(stream, from, 128)
                 .await
-                .map_err(storage_error)?;
+                .map_err(|error| storage_error(&error))?;
             if entries.is_empty() {
                 break;
             }
@@ -108,7 +111,7 @@ impl StreamRunLogStore {
             .streams
             .read_window(stream, 0, 1)
             .await
-            .map_err(storage_error)?
+            .map_err(|error| storage_error(&error))?
             .into_iter()
             .next()
         else {
@@ -149,7 +152,7 @@ impl RunLogStore for StreamRunLogStore {
             self.streams
                 .append_batch_if_offset(&stream, 0, vec![Value::String(header)])
                 .await
-                .map_err(storage_error)?;
+                .map_err(|error| storage_error(&error))?;
             Ok(())
         })
     }
@@ -157,7 +160,13 @@ impl RunLogStore for StreamRunLogStore {
     fn append<'a>(&'a self, run_id: &'a str, line: &'a str) -> RunLogFuture<'a, ()> {
         Box::pin(async move {
             let stream = Self::stream_name(run_id)?;
-            if self.streams.len(&stream).await.map_err(storage_error)? == 0 {
+            if self
+                .streams
+                .len(&stream)
+                .await
+                .map_err(|error| storage_error(&error))?
+                == 0
+            {
                 return Err(RunLogError::Backend("run log not found".into()));
             }
             let mut line = line.to_owned();
@@ -167,7 +176,7 @@ impl RunLogStore for StreamRunLogStore {
             self.streams
                 .append(&stream, Value::String(line))
                 .await
-                .map_err(storage_error)?;
+                .map_err(|error| storage_error(&error))?;
             Ok(())
         })
     }
@@ -190,7 +199,11 @@ impl RunLogStore for StreamRunLogStore {
                 cursor_state(cursor, &backend, run_id, &generation)
             })?;
             let mut content = Vec::with_capacity(max_bytes);
-            let length = self.streams.len(&stream).await.map_err(storage_error)?;
+            let length = self
+                .streams
+                .len(&stream)
+                .await
+                .map_err(|error| storage_error(&error))?;
             if offset > length {
                 return Err(RunLogError::InvalidCursor);
             }
@@ -202,7 +215,7 @@ impl RunLogStore for StreamRunLogStore {
                     .streams
                     .read_window(&stream, offset, 1)
                     .await
-                    .map_err(storage_error)?
+                    .map_err(|error| storage_error(&error))?
                     .into_iter()
                     .next()
                 else {
@@ -256,7 +269,7 @@ impl RunLogStore for StreamRunLogStore {
                 .streams
                 .streams(&format!("{RUN_LOG_PREFIX}/"))
                 .await
-                .map_err(storage_error)?;
+                .map_err(|error| storage_error(&error))?;
             let mut runs = Vec::new();
             for stream in names {
                 let Some(run_id) = Self::decode_run_id(&stream) else {
@@ -283,12 +296,12 @@ impl RunLogStore for StreamRunLogStore {
             self.streams
                 .delete_stream(&stream)
                 .await
-                .map_err(storage_error)
+                .map_err(|error| storage_error(&error))
         })
     }
 }
 
-fn storage_error(error: StorageError) -> RunLogError {
+fn storage_error(error: &StorageError) -> RunLogError {
     RunLogError::Backend(error.to_string())
 }
 
@@ -363,7 +376,12 @@ fn new_generation() -> String {
 }
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        encoded.push(char::from(b"0123456789abcdef"[(byte >> 4) as usize]));
+        encoded.push(char::from(b"0123456789abcdef"[(byte & 0x0f) as usize]));
+    }
+    encoded
 }
 
 fn decode_hex(value: &str) -> Option<Vec<u8>> {
@@ -372,7 +390,7 @@ fn decode_hex(value: &str) -> Option<Vec<u8>> {
     }
     value
         .as_bytes()
-        .chunks_exact(2)
+        .chunks(2)
         .map(|pair| {
             let pair = std::str::from_utf8(pair).ok()?;
             u8::from_str_radix(pair, 16).ok()
