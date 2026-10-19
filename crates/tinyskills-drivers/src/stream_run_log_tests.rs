@@ -6,6 +6,8 @@ use tinystoragedrivers_core::{MemoryStorage, Scope, StorageBackend, StreamEntry,
 
 #[path = "stream_run_log_race_tests.rs"]
 mod race_tests;
+#[path = "stream_run_log_validation_tests.rs"]
+mod validation_tests;
 
 #[derive(Debug, Default)]
 struct ReadMetrics {

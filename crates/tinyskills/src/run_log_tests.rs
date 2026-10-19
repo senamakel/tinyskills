@@ -243,3 +243,41 @@ fn read_terminal_outcome_requires_finished_line() {
         "DONE"
     );
 }
+
+#[test]
+fn parse_run_log_text_preserves_header_and_terminal_metadata() {
+    let text = "==== workflow_run: workflow-a ====\n\
+                run_id : run-123\n\
+                started: 2026-01-01T00:00:00Z UTC\n\
+                status  : not-a-result-yet\n\
+                --- result ---\n\
+                status  : DONE\n\
+                duration: 17 ms\n\
+                finished: 2026-01-01T00:00:01Z UTC\n";
+    let run = parse_run_log_text(text, "file:///run.log").unwrap();
+    assert_eq!(run.workflow_id, "workflow-a");
+    assert_eq!(run.run_id, "run-123");
+    assert_eq!(run.started, "2026-01-01T00:00:00Z UTC");
+    assert_eq!(run.status, "DONE");
+    assert_eq!(run.duration_ms, Some(17));
+    assert_eq!(run.finished.as_deref(), Some("2026-01-01T00:00:01Z"));
+    assert_eq!(run.log_path, "file:///run.log");
+    assert!(parse_run_log_text("not a run", "unused").is_none());
+    assert!(parse_run_log_text("==== workflow_run: x ====\n", "unused").is_none());
+}
+
+#[test]
+fn file_slice_rejects_mid_scalar_and_past_end_cursors() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().join("unicode.log");
+    std::fs::write(&path, "a🙂b").unwrap();
+    assert_eq!(read_run_log_slice(&path, 0, 1).unwrap().content, "a");
+    assert_eq!(
+        read_run_log_slice(&path, 2, 1).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+    assert_eq!(
+        read_run_log_slice(&path, 99, 1).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+}

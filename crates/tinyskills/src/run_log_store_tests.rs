@@ -287,6 +287,46 @@ async fn file_store_small_tail_pages_preserve_utf8_boundaries() {
     }
 }
 
+#[test]
+fn opaque_file_cursors_validate_encoding_owner_and_generation() {
+    let cursor = RunCursor::new("workspace-a", "run-a", "generation-a", 12, 3).unwrap();
+    assert_eq!(
+        cursor
+            .state("workspace-a", "run-a", "generation-a")
+            .unwrap(),
+        (12, 3)
+    );
+    assert!(cursor.validate_owner("workspace-a", "run-a").is_ok());
+    assert!(matches!(
+        cursor.validate_owner("workspace-b", "run-a"),
+        Err(RunLogError::InvalidCursor)
+    ));
+    assert!(matches!(
+        cursor.state("workspace-a", "run-b", "generation-a"),
+        Err(RunLogError::InvalidCursor)
+    ));
+    assert!(matches!(
+        cursor.state("workspace-a", "run-a", "generation-b"),
+        Err(RunLogError::InvalidCursor)
+    ));
+
+    for token in [
+        String::new(),
+        "a".to_owned(),
+        "zz".to_owned(),
+        "7b".to_owned(),
+    ] {
+        assert!(matches!(
+            RunCursor::from_opaque(token).validate_owner("workspace-a", "run-a"),
+            Err(RunLogError::InvalidCursor)
+        ));
+    }
+    assert!(matches!(
+        RunCursor::from_opaque("0".repeat(8194)).state("workspace-a", "run-a", "generation-a"),
+        Err(RunLogError::InvalidCursor)
+    ));
+}
+
 #[tokio::test]
 async fn file_store_rejects_a_cursor_inside_a_utf8_scalar() {
     let temp = tempfile::TempDir::new().unwrap();

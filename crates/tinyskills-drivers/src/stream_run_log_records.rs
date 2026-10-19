@@ -88,3 +88,7 @@ pub(super) fn update_summary(summary: &mut run_log::RunLogSummary, text: &str) {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "stream_run_log_records_tests.rs"]
+mod tests;
