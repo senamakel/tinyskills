@@ -348,7 +348,11 @@ fn edit_refuses_non_file_entries_in_read_only_legacy_sources()
     assert!(scratch_bundle.is_dir());
     assert!(!scratch_bundle.join("socket").exists());
     assert!(dir.join("socket").exists());
-    assert!(dir.join("SKILL.md").is_file());
+    let original_document = fs::read(dir.join("SKILL.md"))?;
+    let copied_document = scratch_bundle.join("SKILL.md");
+    if copied_document.exists() {
+        assert_eq!(fs::read(copied_document)?, original_document);
+    }
     Ok(())
 }
 
