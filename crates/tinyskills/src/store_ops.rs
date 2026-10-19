@@ -152,7 +152,7 @@ pub async fn install_compiled_in_store<S: BundleStore + ?Sized>(
 ) -> Vec<Result<PublishedBundle, BundleOperationError>> {
     let mut results = Vec::with_capacity(bundles.len());
     for bundle in bundles {
-        let result = (|| async {
+        let result = async {
             bundle
                 .validate()
                 .map_err(|_| BundleOperationError::InvalidCompiledBundle)?;
@@ -217,7 +217,7 @@ pub async fn install_compiled_in_store<S: BundleStore + ?Sized>(
                 revision,
                 digest: content.digest(),
             })
-        })()
+        }
         .await;
         results.push(result);
     }
