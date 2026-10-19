@@ -272,7 +272,7 @@ async fn legacy_import_is_read_only_and_store_content_wins_on_edit()
         BundleDocument::Workflow,
         "---\nname: demo\ndescription: cloud\n---\ncloud body\n",
         vec![],
-    );
+    )?;
     store
         .publish("demo", Some(first.revision), &newer)
         .await
@@ -342,7 +342,7 @@ async fn compiled_install_publishes_files_and_does_not_replace_user_heads()
         BundleDocument::Skill,
         "---\nname: builtin\ndescription: changed\n---\nuser version\n",
         vec![],
-    );
+    )?;
     store
         .publish("builtin", Some(installed.revision), &newer)
         .await
@@ -397,7 +397,7 @@ async fn authoring_rejects_traversal_before_writing_beyond_scratch()
         BundleDocument::Workflow,
         "---\nname: escape\ndescription: stored\n---\nstored body\n",
         vec![],
-    );
+    )?;
     store
         .publish("../escape", None, &existing)
         .await
