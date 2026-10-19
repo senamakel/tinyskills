@@ -29,6 +29,22 @@ async fn failed_start_removes_its_log_and_reservation() {
 }
 
 #[tokio::test]
+async fn partial_start_log_is_preserved_until_clear_then_can_be_recreated() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let store = FileRunLogStore::new(temp.path());
+    let run = start();
+    let path = file_store_path(temp.path(), run.workflow_id, run.run_id, run.started);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "run_generation: partial\n").unwrap();
+
+    assert!(store.start(run.clone()).await.is_err());
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "run_generation: partial\n");
+    assert!(store.clear(run.run_id).await.unwrap());
+    assert!(!path.exists());
+    store.start(run).await.unwrap();
+}
+
+#[tokio::test]
 async fn summary_write_keeps_the_length_that_was_parsed() {
     let temp = tempfile::TempDir::new().unwrap();
     let store = FileRunLogStore::new(temp.path());
