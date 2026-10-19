@@ -150,7 +150,7 @@ impl RunCursor {
         let bytes = self
             .0
             .as_bytes()
-            .chunks_exact(2)
+            .chunks(2)
             .map(|pair| {
                 let hex = std::str::from_utf8(pair).map_err(|_| RunLogError::InvalidCursor)?;
                 u8::from_str_radix(hex, 16).map_err(|_| RunLogError::InvalidCursor)
