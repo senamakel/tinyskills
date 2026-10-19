@@ -17,6 +17,7 @@ mod catalog;
 mod digest;
 mod discovery;
 mod document;
+mod file_run_log_store;
 mod flat;
 mod install;
 mod layout;
@@ -27,6 +28,7 @@ mod model;
 mod registry;
 mod resource;
 pub mod run_log;
+mod run_log_store;
 mod scan;
 #[cfg(feature = "registry")]
 mod scan_gate;
@@ -60,6 +62,7 @@ pub use discovery::{
     resolve_collisions, resolve_collisions_with, scan_root,
 };
 pub use document::{inventory_resources, parse_skill, parse_skill_str, read_document};
+pub use file_run_log_store::FileRunLogStore;
 pub use flat::{FlatError, FlatSkill, parse_flat, render_flat, split_frontmatter};
 pub use install::{
     DocumentError, FetchedDocument, InstallError, MAX_INSTALL_DOCUMENT_BYTES, MAX_INSTALL_URL_LEN,
@@ -95,6 +98,10 @@ pub use registry::{
     normalize_registry_document_url,
 };
 pub use resource::{ResourceError, read_resource, resolve_skill};
+pub use run_log_store::{
+    MAX_RUN_LOG_TAIL_BYTES, RunCursor, RunLogError, RunLogFuture, RunLogPage, RunLogStart,
+    RunLogStore,
+};
 pub use scan::{
     Finding, ScanCheck, ScanDocument, ScanField, ScanReport, ScanResource, Verdict, is_invisible,
     sanitize_catalogue_text, scan_skill,

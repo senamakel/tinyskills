@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use super::*;
+use crate::{FileRunLogStore, RunLogStart, RunLogStore};
 
 #[test]
 fn detect_repeated_line_catches_real_failure_modes() {
@@ -242,4 +243,96 @@ fn read_terminal_outcome_requires_finished_line() {
             .status,
         "DONE"
     );
+}
+
+#[test]
+fn parse_run_log_text_preserves_header_and_terminal_metadata() {
+    let text = "==== workflow_run: workflow-a ====\n\
+                run_id : run-123\n\
+                started: 2026-01-01T00:00:00Z UTC\n\
+                status  : not-a-result-yet\n\
+                --- result ---\n\
+                status  : DONE\n\
+                duration: 17 ms\n\
+                finished: 2026-01-01T00:00:01Z UTC\n";
+    let run = parse_run_log_text(text, "file:///run.log").unwrap();
+    assert_eq!(run.workflow_id, "workflow-a");
+    assert_eq!(run.run_id, "run-123");
+    assert_eq!(run.started, "2026-01-01T00:00:00Z UTC");
+    assert_eq!(run.status, "DONE");
+    assert_eq!(run.duration_ms, Some(17));
+    assert_eq!(run.finished.as_deref(), Some("2026-01-01T00:00:01Z"));
+    assert_eq!(run.log_path, "file:///run.log");
+    assert!(parse_run_log_text("not a run", "unused").is_none());
+    assert!(parse_run_log_text("==== workflow_run: x ====\n", "unused").is_none());
+}
+
+#[test]
+fn file_slice_rejects_mid_scalar_and_past_end_cursors() {
+    let tmp = tempfile::TempDir::new().unwrap();
+    let path = tmp.path().join("unicode.log");
+    std::fs::write(&path, "a🙂b").unwrap();
+    assert_eq!(read_run_log_slice(&path, 0, 1).unwrap().content, "a");
+    assert_eq!(
+        read_run_log_slice(&path, 2, 1).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+    assert_eq!(
+        read_run_log_slice(&path, 99, 1).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+}
+
+#[tokio::test]
+async fn file_slice_rechecks_a_summary_sidecar_after_a_legacy_footer_append() {
+    let workspace = tempfile::TempDir::new().unwrap();
+    let store = FileRunLogStore::new(workspace.path());
+    store
+        .start(RunLogStart {
+            workflow_id: "workflow-a",
+            run_id: "run-legacy-footer",
+            started: "2026-01-01T00:00:00Z",
+            inputs: &serde_json::json!({}),
+            task_prompt: "prompt",
+        })
+        .await
+        .unwrap();
+    let path = PathBuf::from(&store.list(None, 10).await.unwrap().remove(0).log_path);
+
+    write_footer(&path, "DONE", 23, "2026-01-01T00:00:01Z", "legacy result").unwrap();
+
+    let slice = read_run_log_slice(&path, 0, 4096).unwrap();
+    assert!(slice.eof);
+    assert!(slice.complete);
+}
+
+#[test]
+fn file_slice_rejects_a_sidecar_for_another_generation() {
+    let workspace = tempfile::TempDir::new().unwrap();
+    let path = workspace.path().join("current-run.log");
+    write_header(
+        &path,
+        "workflow-a",
+        "run-current",
+        "2026-01-01T00:00:00Z",
+        &serde_json::json!({}),
+        "prompt",
+    )
+    .unwrap();
+    let observed_len = std::fs::metadata(&path).unwrap().len();
+    let summary_path = path.with_extension("summary.json");
+    std::fs::write(
+        summary_path,
+        serde_json::json!({
+            "summary": {"complete": true},
+            "generation": "stale-generation",
+            "observed_len": observed_len,
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let slice = read_run_log_slice(&path, 0, 4096).unwrap();
+    assert!(slice.eof);
+    assert!(!slice.complete);
 }

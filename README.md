@@ -47,6 +47,7 @@ for skill in skills {
 - authoring budgets: `validate_description_chars` (counted in characters) and `check_frontmatter_size` (bytes in the frontmatter block)
 - `materialize_tree`: rebuild a `<root>/<dir>/` tree inside an open parent directory handle from inline documents and open bundle directory handles, skipping symlinks, with checked names, bounded depth, and a per-file size cap. It takes `cap_std` handles (re-exported) and resolves no path, so opening the handles is the caller's job; the new tree is built beside the old one and swapped in on success
 - `SkillRegistry` (feature `registry`): cached, searchable skill catalogs (the Hermes index, host-supplied static libraries) with stale-while-revalidate reads, single-flight refresh, ranked paged search, facets, and guarded `SKILL.md` fetches. Network I/O is host-supplied through `RegistryTransport`; the crate links no HTTP client
+- `RunLogStore`: asynchronous start, append, tail, list, and clear operations over opaque cursors; `FileRunLogStore` keeps the existing `<workspace>/skills/.runs/*.log` layout, while `tinyskills-drivers` adds one `StreamStore` stream per run
 - `read_skill_archive` (feature `archive`): reads a `.zip`/`.skill`, `.tar`, or `.tar.gz` upload into its `SKILL.md`, root directory, and bundled files. It refuses traversal, absolute or backslash paths, symlinks and hard links, and nested archives, and checks entry-count and expanded-size caps before reading any content
 
 ## User bundle content and persistence contract

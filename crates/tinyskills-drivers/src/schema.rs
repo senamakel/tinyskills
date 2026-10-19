@@ -7,6 +7,7 @@
 //! | blobs `<host prefix>/<bundle id>/…` | blobs `skills/bundles/<bundle id>/…` | tenant |
 //! | — | blobs `skills/bundle-generations/<bundle id>/<generation>/…` | tenant |
 //! | — | collection `skills.bundles` (schema 1) | tenant |
+//! | — | streams `skills.run_logs/<run id>` | tenant |
 //!
 //! The host composes [`storage_schema`] into its `Registry`, which declares
 //! the items, derives the module grant and runs the steps.
@@ -18,6 +19,7 @@ use crate::document_store::CatalogBody;
 use crate::{
     blob_bundles::{BUNDLE_GENERATION_PREFIX, BUNDLE_PREFIX},
     bundle_store::{BUNDLE_COLLECTION, BUNDLE_SCHEMA},
+    stream_run_log::RUN_LOG_PREFIX,
 };
 
 /// The collection that holds one document per registry catalog.
@@ -32,9 +34,10 @@ pub(crate) const CATALOG_SCHEMA: u32 = 2;
 /// Everything `tinyskills-drivers` stores, as the owner `skills`:
 /// the catalog collection `skills.catalogs`, the bundle head collection
 /// `skills.bundles`, the user-facing bundle blob prefix `skills/bundles`, and
-/// the disjoint immutable generation prefix `skills/bundle-generations`, all
-/// tenant scoped, plus the step that moves
-/// `tinyskills_catalogs` into `skills.catalogs`.
+/// the disjoint immutable generation prefix `skills/bundle-generations`, and
+/// the run-log stream prefix `skills.run_logs`. All are tenant scoped; the
+/// schema also includes the step that moves `tinyskills_catalogs` into
+/// `skills.catalogs`.
 ///
 /// # Panics
 ///
@@ -49,6 +52,7 @@ pub fn storage_schema() -> Schema {
         .collection(BUNDLE_COLLECTION, BUNDLE_SCHEMA, ScopeClass::Tenant)
         .blobs(BUNDLE_PREFIX, ScopeClass::Tenant)
         .blobs(BUNDLE_GENERATION_PREFIX, ScopeClass::Tenant)
+        .stream(RUN_LOG_PREFIX, ScopeClass::Tenant)
         .step(catalogs_step())
 }
 

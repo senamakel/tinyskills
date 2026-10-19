@@ -71,6 +71,7 @@ fn schema_declares_the_v2_items_under_the_skills_owner() {
             "skills.bundles",
             "skills/bundles",
             "skills/bundle-generations",
+            "skills.run_logs",
         ]
     );
     assert!(

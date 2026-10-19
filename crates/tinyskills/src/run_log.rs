@@ -23,6 +23,15 @@ use serde_json::Value;
 
 const RESULT_MARKER: &str = "--- result ---";
 
+#[path = "run_log_summary.rs"]
+mod summary;
+#[cfg(test)]
+pub(crate) use summary::full_file_summary_parse_count;
+pub(crate) use summary::read_run_log_header_identity;
+#[cfg(test)]
+pub(crate) use summary::read_run_log_header_identity_from_reader;
+pub use summary::{RunLogSummary, read_run_log_summary, read_run_log_summary_from_text};
+
 /// `<workspace>/skills/.runs`.
 #[must_use]
 pub fn runs_dir(workspace: &Path) -> PathBuf {
@@ -98,7 +107,22 @@ pub fn write_header(
     inputs: &Value,
     task_prompt: &str,
 ) -> std::io::Result<()> {
-    let header = format!(
+    append_line(
+        path,
+        &format_header(workflow_id, run_id, started, inputs, task_prompt),
+    )
+}
+
+/// Format a run header in the same layout written by [`write_header`].
+#[must_use]
+pub fn format_header(
+    workflow_id: &str,
+    run_id: &str,
+    started: &str,
+    inputs: &Value,
+    task_prompt: &str,
+) -> String {
+    format!(
         "==== workflow_run: {workflow_id} ====\n\
          run_id : {run_id}\n\
          started: {started} UTC\n\
@@ -106,8 +130,7 @@ pub fn write_header(
          --- task prompt ---\n{task_prompt}\n\n\
          --- steps ---",
         inputs = serde_json::to_string(inputs).unwrap_or_default(),
-    );
-    append_line(path, &header)
+    )
 }
 
 /// Write the final footer: status, duration, and the final output text.
@@ -119,13 +142,16 @@ pub fn write_footer(
     finished: &str,
     output: &str,
 ) -> std::io::Result<()> {
-    let footer = format!(
+    append_line(path, &format_footer(status, elapsed_ms, finished, output))
+}
+
+pub(crate) fn format_footer(status: &str, elapsed_ms: u64, finished: &str, output: &str) -> String {
+    format!(
         "\n{RESULT_MARKER}\n\
          status  : {status}\n\
          duration: {elapsed_ms} ms\n\
          finished: {finished} UTC\n\n{output}\n",
-    );
-    append_line(path, &footer)
+    )
 }
 
 /// Detect the degenerate "same paragraph repeated many times in one
@@ -154,7 +180,7 @@ pub fn detect_repeated_line(
 
 /// One run extracted from a `.runs/<skill>_<ts>_<run>.log` file. Status is
 /// `RUNNING` until the footer lands.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Eq)]
 pub struct ScannedRun {
     /// Full run id from the header.
     pub run_id: String,
@@ -187,71 +213,25 @@ pub fn scan_runs(workspace: &Path, workflow_id: Option<&str>, limit: usize) -> V
         if path.extension().and_then(|e| e.to_str()) != Some("log") {
             continue;
         }
-        let Ok(text) = std::fs::read_to_string(&path) else {
+        let Ok(Some(summary)) = read_run_log_summary(&path) else {
             continue;
         };
-        let mut sid = String::new();
-        let mut rid = String::new();
-        let mut started = String::new();
-        let mut status = String::from("RUNNING");
-        let mut duration_ms: Option<u64> = None;
-        let mut finished: Option<String> = None;
-        let mut seen_result = false;
-        // Labels are right-padded (`status  : DONE`); split on the first `:`
-        // and trim both halves.
-        for line in text.lines() {
-            if line.starts_with("==== workflow_run:") {
-                sid = line
-                    .trim_start_matches("==== workflow_run:")
-                    .trim()
-                    .trim_end_matches('=')
-                    .trim()
-                    .to_string();
-                continue;
-            }
-            if line.starts_with(RESULT_MARKER) {
-                seen_result = true;
-                continue;
-            }
-            let Some((label_raw, value_raw)) = line.split_once(':') else {
-                continue;
-            };
-            let label = label_raw.trim();
-            let value = value_raw.trim();
-            match (label, seen_result) {
-                ("run_id", false) => rid = value.to_string(),
-                ("started", false) => started = value.to_string(),
-                ("status", true) => status = value.to_string(),
-                ("duration", true) => {
-                    if let Ok(n) = value.trim_end_matches(" ms").trim().parse::<u64>() {
-                        duration_ms = Some(n);
-                    }
-                }
-                ("finished", true) => {
-                    finished = Some(value.trim_end_matches(" UTC").trim().to_string());
-                }
-                _ => {}
-            }
+        let run = summary.run;
+        if workflow_id.is_none_or(|want| run.workflow_id == want) {
+            runs.push(run);
         }
-        if sid.is_empty() || rid.is_empty() {
-            continue;
-        }
-        if workflow_id.is_some_and(|want| sid != want) {
-            continue;
-        }
-        runs.push(ScannedRun {
-            run_id: rid,
-            workflow_id: sid,
-            started,
-            status,
-            duration_ms,
-            finished,
-            log_path: path.to_string_lossy().into_owned(),
-        });
     }
     runs.sort_by(|a, b| b.started.cmp(&a.started));
     runs.truncate(limit);
     runs
+}
+
+/// Parse one complete or currently-writing run log using the existing header
+/// and footer rules. `log_path` is retained for compatibility with the
+/// [`ScannedRun`] wire shape; storage-backed adapters may supply a stable URI.
+#[must_use]
+pub fn parse_run_log_text(text: &str, log_path: &str) -> Option<ScannedRun> {
+    read_run_log_summary_from_text(text, log_path).map(|summary| summary.run)
 }
 
 /// Resolve a run id to its log path by matching the `_<first 8 chars>.log`
@@ -325,7 +305,7 @@ pub struct RunLogSlice {
     pub offset: u64,
     /// Bytes returned in this slice.
     pub bytes_read: u64,
-    /// Slice text (lossy UTF-8).
+    /// Slice text, ending at a UTF-8 character boundary.
     pub content: String,
     /// Whether the slice reached end of file.
     pub eof: bool,
@@ -333,7 +313,11 @@ pub struct RunLogSlice {
     pub complete: bool,
 }
 
-/// Read up to `max_bytes` of the log from `offset`, for tailing.
+/// Read at least one byte and up to `max_bytes` of the log from `offset`,
+/// extending by at most three bytes when needed to finish a UTF-8 scalar.
+///
+/// Offsets must point to UTF-8 character boundaries. A cursor inside a scalar
+/// is rejected instead of returning replacement characters.
 pub fn read_run_log_slice(
     path: &Path,
     offset: u64,
@@ -341,6 +325,12 @@ pub fn read_run_log_slice(
 ) -> std::io::Result<RunLogSlice> {
     let mut f = std::fs::File::open(path)?;
     let file_size = f.metadata()?.len();
+    if offset > file_size {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "cursor is past end of run log",
+        ));
+    }
     if offset >= file_size {
         return Ok(RunLogSlice {
             offset,
@@ -350,17 +340,47 @@ pub fn read_run_log_slice(
             complete: file_has_footer(path)?,
         });
     }
+    let mut first = [0; 1];
     f.seek(SeekFrom::Start(offset))?;
-    let want = usize::try_from((file_size - offset).min(max_bytes as u64)).unwrap_or(max_bytes);
+    f.read_exact(&mut first)?;
+    if (0x80..=0xbf).contains(&first[0]) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "cursor is inside a UTF-8 scalar",
+        ));
+    }
+    if max_bytes == 0 {
+        return Ok(RunLogSlice {
+            offset,
+            bytes_read: 0,
+            content: String::new(),
+            eof: false,
+            complete: false,
+        });
+    }
+    f.seek(SeekFrom::Start(offset))?;
+    let target = max_bytes;
+    let want = usize::try_from((file_size - offset).min(target as u64)).unwrap_or(target);
     let mut buf = vec![0u8; want];
     f.read_exact(&mut buf)?;
-    let content = String::from_utf8_lossy(&buf).into_owned();
+    while std::str::from_utf8(&buf).is_err_and(|error| error.error_len().is_none())
+        && u64::try_from(buf.len()).unwrap_or(u64::MAX) < file_size - offset
+        && buf.len() < target.saturating_add(3)
+    {
+        let mut next = [0; 1];
+        f.read_exact(&mut next)?;
+        buf.push(next[0]);
+    }
     let bytes_read = buf.len() as u64;
+    let content = String::from_utf8(buf).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "run log is not valid UTF-8",
+        )
+    })?;
     let new_offset = offset + bytes_read;
     let eof = new_offset >= file_size;
-    let complete = (eof
-        && (content.contains("\n--- result ---\n") || content.starts_with("--- result ---\n")))
-        || file_has_footer(path)?;
+    let complete = eof && file_has_footer(path)?;
     Ok(RunLogSlice {
         offset: new_offset,
         bytes_read,
@@ -371,7 +391,25 @@ pub fn read_run_log_slice(
 }
 
 fn file_has_footer(path: &Path) -> std::io::Result<bool> {
-    Ok(std::fs::read_to_string(path)?.contains("\n--- result ---\n"))
+    let summary_path = path.with_extension("summary.json");
+    if let Ok(bytes) = std::fs::read(summary_path)
+        && let Ok(summary) = serde_json::from_slice::<serde_json::Value>(&bytes)
+        && summary
+            .get("observed_len")
+            .and_then(serde_json::Value::as_u64)
+            == Some(std::fs::metadata(path)?.len())
+        && summary
+            .get("generation")
+            .and_then(serde_json::Value::as_str)
+            == Some(crate::file_run_log_store::file_generation(path)?.as_str())
+        && let Some(complete) = summary
+            .get("summary")
+            .and_then(|summary| summary.get("complete"))
+            .and_then(serde_json::Value::as_bool)
+    {
+        return Ok(complete);
+    }
+    Ok(read_run_log_summary(path)?.is_some_and(|summary| summary.complete))
 }
 
 #[cfg(test)]
