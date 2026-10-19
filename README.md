@@ -257,9 +257,13 @@ GPL-3.0-only. See [LICENSE](LICENSE).
 `tinyskills-drivers` (an unpublished workspace crate that depends on
 `tinystoragedrivers-core` only) puts the host's storage under the crate:
 `DocumentCatalogStore` keeps fetched registry catalogs as documents
-(`skills.catalogs/<registry>`), and `BlobBundles` keeps bundle files as a
-blob tree (`skills/bundles/<bundle id>/<path>`). `storage_schema()` declares
-both under the owner `skills` (tenant scope) for the host's `Registry::compose`,
+(`skills.catalogs/<registry>`), `BlobBundles` keeps compiled bundle files as a
+blob tree (`skills/bundles/<bundle id>/<path>`), and `DocumentBundleStore`
+keeps authored bundle heads as CAS documents in `skills.bundles`. Its immutable
+generations use the disjoint `skills/bundle-generations/<bundle id>/<generation>/<path>`
+prefix, so legacy `BlobBundles` replacement and deletion cannot remove bytes
+that a committed head references. `storage_schema()` declares these collections
+and blob prefixes under the owner `skills` (tenant scope) for the host's `Registry::compose`,
 with the step that moves the v1 `tinyskills_catalogs` collection into
 `skills.catalogs`. v1 bundle blobs lived under a host-chosen prefix, so the
 host moves them itself (a step cannot read a prefix that contains the new one). Discovery needs real directories, so

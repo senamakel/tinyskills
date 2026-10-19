@@ -11,16 +11,22 @@
 //!   cache directory for discovery with [`BlobBundles::materialize`].
 //! - [`StreamRunLogStore`]: one append-only stream per run, with tenant scope
 //!   bound into opaque cursors.
-//! - [`storage_schema`]: the owner `skills` declaration of (the catalog
-//!   collection, the bundle blob prefix, and the run-log stream prefix) and the
-//!   v1 to v2 migration steps, for the host's `Registry::compose`.
+//! - [`DocumentBundleStore`]: CAS-protected user-bundle heads referencing
+//!   immutable generations under [`BUNDLE_GENERATION_PREFIX`], separate from
+//!   the deletable [`BUNDLE_PREFIX`] tree.
+//! - [`storage_schema`]: the owner `skills` declaration of the catalog and
+//!   bundle-head collections, both blob prefixes, the run-log stream prefix,
+//!   and catalog migration steps,
+//!   for the host's `Registry::compose`.
 
 mod blob_bundles;
+mod bundle_store;
 mod document_store;
 mod schema;
 mod stream_run_log;
 
-pub use blob_bundles::{BUNDLE_PREFIX, BlobBundleError, BlobBundles};
+pub use blob_bundles::{BUNDLE_GENERATION_PREFIX, BUNDLE_PREFIX, BlobBundleError, BlobBundles};
+pub use bundle_store::{BUNDLE_COLLECTION, DocumentBundleStore};
 pub use document_store::DocumentCatalogStore;
 pub use schema::{CATALOG_COLLECTION, storage_schema};
 pub use stream_run_log::{RUN_LOG_PREFIX, StreamRunLogStore};

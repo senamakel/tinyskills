@@ -63,6 +63,9 @@ impl From<StorageError> for BlobBundleError {
 /// [`storage_schema`](crate::storage_schema).
 pub const BUNDLE_PREFIX: &str = "skills/bundles";
 
+/// Disjoint storage for immutable user-bundle generations.
+pub const BUNDLE_GENERATION_PREFIX: &str = "skills/bundle-generations";
+
 /// Bundle files in a blob store, one subtree per bundle under
 /// [`BUNDLE_PREFIX`].
 #[derive(Clone)]
