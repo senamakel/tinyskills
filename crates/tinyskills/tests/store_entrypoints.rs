@@ -344,10 +344,7 @@ async fn authoring_rejects_traversal_before_writing_beyond_scratch() {
         "---\nname: escape\ndescription: stored\n---\nstored body\n",
         vec![],
     );
-    store
-        .publish("../escape", None, &existing)
-        .await
-        .unwrap();
+    store.publish("../escape", None, &existing).await.unwrap();
     let temp = tempfile::tempdir().unwrap();
     let scratch = temp.path().join("scratch");
     let spec = BundleSpec {
@@ -373,4 +370,87 @@ async fn authoring_rejects_traversal_before_writing_beyond_scratch() {
         ))
     ));
     assert!(!temp.path().join("escape/WORKFLOW.md").exists());
+}
+
+#[tokio::test]
+async fn legacy_import_rejects_oversized_files_before_copying_them() {
+    let store = MemoryStore::default();
+    let temp = tempfile::tempdir().unwrap();
+    let legacy = temp.path().join("legacy");
+    let bundle_dir = legacy.join("demo");
+    std::fs::create_dir_all(bundle_dir.join("scripts")).unwrap();
+    std::fs::write(
+        bundle_dir.join("WORKFLOW.md"),
+        "---\nname: demo\ndescription: demo\n---\nbody\n",
+    )
+    .unwrap();
+    std::fs::File::create(bundle_dir.join("scripts/oversized.bin"))
+        .unwrap()
+        .set_len((BundleLimits::default().max_file_bytes + 1) as u64)
+        .unwrap();
+    let spec = BundleSpec {
+        slug: "demo".into(),
+        description: "updated".into(),
+        ..Default::default()
+    };
+    let result = scaffold_bundle_in_store(
+        &store,
+        &temp.path().join("scratch"),
+        &spec,
+        &tinyskills::ScaffoldOptions {
+            overwrite: true,
+            legacy_roots: vec![legacy],
+            ..Default::default()
+        },
+        None,
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(tinyskills::BundleOperationError::Content(
+            tinyskills::BundleContentError::Limit("file bytes")
+        ))
+    ));
+    assert!(store.read("demo").await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn legacy_import_rejects_too_deep_trees_before_copying_them() {
+    let store = MemoryStore::default();
+    let temp = tempfile::tempdir().unwrap();
+    let legacy = temp.path().join("legacy");
+    let bundle_dir = legacy.join("demo");
+    std::fs::create_dir_all(&bundle_dir).unwrap();
+    std::fs::write(
+        bundle_dir.join("WORKFLOW.md"),
+        "---\nname: demo\ndescription: demo\n---\nbody\n",
+    )
+    .unwrap();
+    let deep = (0..65).fold(bundle_dir, |path, _| path.join("d"));
+    std::fs::create_dir_all(&deep).unwrap();
+    std::fs::write(deep.join("leaf.txt"), "leaf").unwrap();
+    let spec = BundleSpec {
+        slug: "demo".into(),
+        description: "updated".into(),
+        ..Default::default()
+    };
+    let result = scaffold_bundle_in_store(
+        &store,
+        &temp.path().join("scratch"),
+        &spec,
+        &tinyskills::ScaffoldOptions {
+            overwrite: true,
+            legacy_roots: vec![legacy],
+            ..Default::default()
+        },
+        None,
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(tinyskills::BundleOperationError::Content(
+            tinyskills::BundleContentError::Limit("depth")
+        ))
+    ));
+    assert!(store.read("demo").await.unwrap().is_none());
 }
