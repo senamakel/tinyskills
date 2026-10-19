@@ -113,26 +113,6 @@ async fn file_cursor_does_not_encode_the_workspace_path() {
 }
 
 #[tokio::test]
-async fn file_store_does_not_leave_a_reservation_after_summary_failure() {
-    let temp = tempfile::TempDir::new().unwrap();
-    let store = FileRunLogStore::new(temp.path());
-    let run = start(
-        "workflow-a",
-        "run-summary-failure",
-        "2026-01-01T00:00:00Z",
-        "prompt",
-    );
-    let log_path = file_store_path(temp.path(), run.workflow_id, run.run_id, run.started);
-    std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
-    std::fs::create_dir(summary_path(&log_path)).unwrap();
-
-    assert!(store.start(run.clone()).await.is_err());
-    assert!(!log_path.exists());
-    std::fs::remove_dir(summary_path(&log_path)).unwrap();
-    store.start(run).await.unwrap();
-}
-
-#[tokio::test]
 async fn encoded_suffix_collision_does_not_alias_a_legacy_run() {
     let temp = tempfile::TempDir::new().unwrap();
     let legacy_id = "61626364-legacy-run";
@@ -167,38 +147,4 @@ async fn encoded_suffix_collision_does_not_alias_a_legacy_run() {
     assert!(legacy_path.exists());
     assert!(store.clear("abcd").await.unwrap());
     assert!(legacy_path.exists());
-}
-
-#[tokio::test]
-async fn file_summary_cache_never_claims_to_include_a_later_legacy_footer() {
-    let temp = tempfile::TempDir::new().unwrap();
-    let store = FileRunLogStore::new(temp.path());
-    store
-        .start(start(
-            "workflow-a",
-            "run-summary-race",
-            "2026-01-01T00:00:00Z",
-            "prompt",
-        ))
-        .await
-        .unwrap();
-    let log_path = PathBuf::from(&store.list(None, 10).await.unwrap().remove(0).log_path);
-
-    let parsed_before_footer = crate::run_log::read_run_log_summary(&log_path)
-        .unwrap()
-        .unwrap();
-    let generation = file_generation(&log_path).unwrap();
-    crate::run_log::write_footer(
-        &log_path,
-        "DONE",
-        23,
-        "2026-01-01T00:00:01Z",
-        "legacy result",
-    )
-    .unwrap();
-    write_file_summary(&log_path, &parsed_before_footer, &generation).unwrap();
-
-    let repaired = read_file_summary(&log_path).unwrap().unwrap();
-    assert_eq!(repaired.run.status, "DONE");
-    assert!(repaired.complete);
 }

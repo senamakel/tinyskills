@@ -497,3 +497,7 @@ pub(crate) fn new_generation() -> String {
     let sequence = NEXT.fetch_add(1, Ordering::Relaxed);
     format!("{nanos:x}-{sequence:x}")
 }
+
+#[cfg(test)]
+#[path = "file_run_log_store_tests.rs"]
+mod tests;
