@@ -79,6 +79,7 @@ impl RunLogStore for FileRunLogStore {
             );
             let generation = new_generation();
             let header = format!("run_generation: {generation}\n{header}");
+            let summary_generation = generation.clone();
             let path_for_task = path.clone();
             let workspace = self.workspace.clone();
             let run_id = run.run_id.to_owned();
@@ -126,7 +127,7 @@ impl RunLogStore for FileRunLogStore {
                     file.flush()
                 })();
                 if result.is_ok() {
-                    write_file_summary(&path_for_task, &summary)?;
+                    write_file_summary(&path_for_task, &summary, &summary_generation)?;
                 }
                 drop(marker_file);
                 if result.is_err() {
@@ -301,6 +302,8 @@ fn exact_file_path(workspace: &std::path::Path, run_id: &str) -> Option<PathBuf>
 #[derive(Serialize, Deserialize)]
 struct FileSummary {
     summary: run_log::RunLogSummary,
+    generation: String,
+    observed_len: u64,
 }
 
 fn summary_path(path: &Path) -> PathBuf {
@@ -308,20 +311,39 @@ fn summary_path(path: &Path) -> PathBuf {
 }
 
 fn read_file_summary(path: &Path) -> io::Result<Option<run_log::RunLogSummary>> {
-    match std::fs::read(summary_path(path)) {
-        Ok(bytes) => serde_json::from_slice::<FileSummary>(&bytes)
-            .map(|summary| Some(summary.summary))
-            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error)),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error),
+    let metadata = std::fs::metadata(path)?;
+    let observed_len = metadata.len();
+    let generation = file_generation(path)?;
+    let cached = match std::fs::read(summary_path(path)) {
+        Ok(bytes) => serde_json::from_slice::<FileSummary>(&bytes).ok(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+    if let Some(cached) = cached
+        && cached.observed_len == observed_len
+        && cached.generation == generation
+    {
+        return Ok(Some(cached.summary));
     }
+
+    let Some(summary) = run_log::read_run_log_summary(path)? else {
+        return Ok(None);
+    };
+    write_file_summary(path, &summary, &generation)?;
+    Ok(Some(summary))
 }
 
-fn write_file_summary(path: &Path, summary: &run_log::RunLogSummary) -> io::Result<()> {
+fn write_file_summary(
+    path: &Path,
+    summary: &run_log::RunLogSummary,
+    generation: &str,
+) -> io::Result<()> {
     let destination = summary_path(path);
     let temporary = path.with_extension(format!("summary-{}.tmp", new_generation()));
     let bytes = serde_json::to_vec(&FileSummary {
         summary: summary.clone(),
+        generation: generation.to_owned(),
+        observed_len: std::fs::metadata(path)?.len(),
     })
     .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     std::fs::write(&temporary, bytes)?;
@@ -360,7 +382,8 @@ fn update_file_summary(path: &Path, appended: &str) -> io::Result<()> {
             _ => {}
         }
     }
-    write_file_summary(path, &summary)
+    let generation = file_generation(path)?;
+    write_file_summary(path, &summary, &generation)
 }
 
 fn scan_file_runs(workspace: &Path, workflow_id: Option<&str>, limit: usize) -> Vec<ScannedRun> {

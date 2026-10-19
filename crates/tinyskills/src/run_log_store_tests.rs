@@ -133,7 +133,7 @@ async fn file_store_zero_byte_tail_does_not_advance_its_cursor() {
     assert_eq!(repeated.cursor, empty.cursor);
 
     let next = store
-        .tail("run-zero-tail", Some(&empty.cursor), 64)
+        .tail("run-zero-tail", Some(&empty.cursor), 4096)
         .await
         .unwrap();
     assert!(next.content.contains("some text"));
