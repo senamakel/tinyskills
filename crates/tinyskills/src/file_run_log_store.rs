@@ -118,7 +118,7 @@ impl RunLogStore for FileRunLogStore {
                 })?;
                 std::fs::create_dir_all(parent)?;
                 let lifecycle_lock = run_lifecycle_lock(&path_for_task);
-                let _lifecycle_guard = lifecycle_lock
+                let lifecycle_guard = lifecycle_lock
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 if exact_file_path(&workspace, &summary.run.run_id).is_some()
@@ -142,7 +142,7 @@ impl RunLogStore for FileRunLogStore {
                     let _ = std::fs::remove_file(&path_for_task);
                     return Err(error);
                 }
-                drop(_lifecycle_guard);
+                drop(lifecycle_guard);
                 let observed_len = u64::try_from(header.len())
                     .map_err(|_| io::Error::other("run log header length exceeds u64"))?
                     + 1;

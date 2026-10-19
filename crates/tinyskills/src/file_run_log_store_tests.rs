@@ -242,7 +242,9 @@ async fn tail_never_reads_replacement_bytes_with_the_previous_generation_cursor(
             !page.content.contains("replacement-only-tail-marker"),
             "tail must not return replacement bytes under the previous generation cursor"
         ),
-        Err(RunLogError::InvalidCursor) => {}
-        Err(error) => panic!("unexpected tail error: {error}"),
+        Err(error) => assert!(
+            matches!(error, RunLogError::InvalidCursor),
+            "unexpected tail error: {error}"
+        ),
     }
 }
