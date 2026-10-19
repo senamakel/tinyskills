@@ -33,6 +33,7 @@ mod scan;
 mod scan_gate;
 mod search;
 mod slug;
+mod store_ops;
 mod trigger;
 mod user_bundle;
 
@@ -108,6 +109,10 @@ pub use scan_gate::{
 };
 pub use search::{MAX_DESCRIPTION, SkillHit, project, rank};
 pub use slug::{PunctuationRule, SlugError, SlugRules, slugify_with, validate_slug};
+pub use store_ops::{
+    BundleOperationError, PublishedBundle, install_compiled_in_store, install_document_in_store,
+    remove_bundle_from_store, scaffold_bundle_in_store,
+};
 pub use trigger::TriggerPattern;
 
 /// Re-exported so a host opens the directory handles [`materialize_tree`] takes
