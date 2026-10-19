@@ -124,12 +124,16 @@ async fn fetched_install_conflicts_with_a_different_existing_bundle()
         ))
     ));
     let stored = store.read("new-skill").await?.ok_or("bundle missing")?;
-    assert_eq!(stored.content.file("SKILL.md"), Some(&current.document().as_bytes()[..]));
+    assert_eq!(
+        stored.content.file("SKILL.md"),
+        Some(&b"---\nname: New Skill\ndescription: existing\n---\nexisting body\n"[..])
+    );
     Ok(())
 }
 
 #[tokio::test]
-async fn compiled_workflow_install_preserves_its_primary_document() -> Result<(), Box<dyn std::error::Error>> {
+async fn compiled_workflow_install_preserves_its_primary_document()
+-> Result<(), Box<dyn std::error::Error>> {
     static FILES: &[BundledFile] = &[BundledFile {
         path: "WORKFLOW.md",
         contents: "---\nname: built-in workflow\ndescription: built-in\n---\n",
