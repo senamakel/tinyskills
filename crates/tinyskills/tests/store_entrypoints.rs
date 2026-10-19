@@ -2,8 +2,9 @@ use std::{collections::BTreeMap, sync::Mutex};
 
 use tinyskills::{
     BundleDocument, BundleFuture, BundleLimits, BundleRevision, BundleSpec, BundleStore,
-    BundleStoreError, BundleSummary, StoredBundle, UserBundle, install_document_in_store,
-    remove_bundle_from_store, scaffold_bundle_in_store,
+    BundleStoreError, BundleSummary, BundledFile, BundledSkill, StoredBundle, UserBundle,
+    install_compiled_in_store, install_document_in_store, remove_bundle_from_store,
+    scaffold_bundle_in_store,
 };
 
 #[derive(Default)]
@@ -196,11 +197,10 @@ async fn legacy_import_is_read_only_and_store_content_wins_on_edit() {
     )
     .await
     .unwrap();
-    assert_eq!(
+    assert!(
         std::fs::read_to_string(legacy.join("demo/WORKFLOW.md"))
             .unwrap()
-            .contains("description: old"),
-        true
+            .contains("description: old")
     );
     assert_eq!(
         store
@@ -237,4 +237,41 @@ async fn legacy_import_is_read_only_and_store_content_wins_on_edit() {
             }
         ))
     ));
+}
+
+#[tokio::test]
+async fn compiled_install_publishes_files_and_does_not_replace_user_heads() {
+    static FILES: &[BundledFile] = &[
+        BundledFile {
+            path: "SKILL.md",
+            contents: "---\nname: builtin\ndescription: built in\n---\n",
+        },
+        BundledFile {
+            path: "references/info.md",
+            contents: "resource",
+        },
+    ];
+    let store = MemoryStore::default();
+    let compiled = [BundledSkill {
+        dir_name: "builtin",
+        files: FILES,
+    }];
+    let first = install_compiled_in_store(&store, &compiled).await;
+    let installed = first.into_iter().next().unwrap().unwrap();
+    let persisted = store.read("builtin").await.unwrap().unwrap();
+    assert_eq!(
+        persisted.content.file("references/info.md"),
+        Some(&b"resource"[..])
+    );
+    let second = install_compiled_in_store(&store, &compiled).await;
+    assert!(matches!(
+        second.into_iter().next().unwrap(),
+        Err(tinyskills::BundleOperationError::Store(
+            BundleStoreError::Conflict { current: Some(_) }
+        ))
+    ));
+    assert_eq!(
+        store.read("builtin").await.unwrap().unwrap().revision,
+        installed.revision
+    );
 }
