@@ -130,7 +130,8 @@ fn content(
 }
 
 #[tokio::test]
-async fn authoring_reads_store_content_preserves_resources_and_publishes_cas_revision() -> Result<(), Box<dyn std::error::Error>> {
+async fn authoring_reads_store_content_preserves_resources_and_publishes_cas_revision()
+-> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryStore::default();
     let original = content(
         BundleDocument::Workflow,
@@ -160,11 +161,15 @@ async fn authoring_reads_store_content_preserves_resources_and_publishes_cas_rev
         },
         Some(BundleRevision(1)),
     )
-    .await
-    ?;
+    .await?;
     assert_eq!(outcome.revision, BundleRevision(2));
     let stored = store.read("demo").await?.ok_or("expected stored bundle")?;
-    let document = std::str::from_utf8(stored.content.file("WORKFLOW.md").ok_or("missing workflow document")?)?;
+    let document = std::str::from_utf8(
+        stored
+            .content
+            .file("WORKFLOW.md")
+            .ok_or("missing workflow document")?,
+    )?;
     assert!(document.contains("keep body"));
     assert!(document.contains("description: updated"));
     assert_eq!(
@@ -172,14 +177,16 @@ async fn authoring_reads_store_content_preserves_resources_and_publishes_cas_rev
         Some(&b"reference"[..])
     );
     Ok(())
-    Ok(())
 }
 
 #[tokio::test]
-async fn fetched_install_and_remove_use_store_revisions() -> Result<(), Box<dyn std::error::Error>> {
+async fn fetched_install_and_remove_use_store_revisions() -> Result<(), Box<dyn std::error::Error>>
+{
     let store = MemoryStore::default();
     let fetched = b"---\nname: New Skill\ndescription: useful\n---\nbody\n";
-    let installed = install_document_in_store(&store, fetched).await.into_test_result()?;
+    let installed = install_document_in_store(&store, fetched)
+        .await
+        .into_test_result()?;
     assert_eq!(installed.id, "new-skill");
     assert_eq!(
         store
@@ -215,7 +222,8 @@ async fn fetched_install_and_remove_use_store_revisions() -> Result<(), Box<dyn 
 }
 
 #[tokio::test]
-async fn legacy_import_is_read_only_and_store_content_wins_on_edit() -> Result<(), Box<dyn std::error::Error>> {
+async fn legacy_import_is_read_only_and_store_content_wins_on_edit()
+-> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryStore::default();
     let temp = tempfile::tempdir().into_test_result()?;
     let legacy = temp.path().join("legacy");
@@ -289,7 +297,8 @@ async fn legacy_import_is_read_only_and_store_content_wins_on_edit() -> Result<(
 }
 
 #[tokio::test]
-async fn compiled_install_publishes_files_and_does_not_replace_user_heads() -> Result<(), Box<dyn std::error::Error>> {
+async fn compiled_install_publishes_files_and_does_not_replace_user_heads()
+-> Result<(), Box<dyn std::error::Error>> {
     static FILES: &[BundledFile] = &[
         BundledFile {
             path: "SKILL.md",
@@ -306,14 +315,29 @@ async fn compiled_install_publishes_files_and_does_not_replace_user_heads() -> R
         files: FILES,
     }];
     let first = install_compiled_in_store(&store, &compiled).await;
-    let installed = first.into_iter().next().into_test_result()?.into_test_result()?;
-    let persisted = store.read("builtin").await.into_test_result()?.into_test_result()?;
+    let installed = first
+        .into_iter()
+        .next()
+        .into_test_result()?
+        .into_test_result()?;
+    let persisted = store
+        .read("builtin")
+        .await
+        .into_test_result()?
+        .into_test_result()?;
     assert_eq!(
         persisted.content.file("references/info.md"),
         Some(&b"resource"[..])
     );
     let second = install_compiled_in_store(&store, &compiled).await;
-    assert_eq!(second.into_iter().next().into_test_result()?.into_test_result()?, installed);
+    assert_eq!(
+        second
+            .into_iter()
+            .next()
+            .into_test_result()?
+            .into_test_result()?,
+        installed
+    );
     let newer = content(
         BundleDocument::Skill,
         "---\nname: builtin\ndescription: changed\n---\nuser version\n",
@@ -333,14 +357,20 @@ async fn compiled_install_publishes_files_and_does_not_replace_user_heads() -> R
         ))
     ));
     assert_eq!(
-        store.read("builtin").await.into_test_result()?.into_test_result()?.revision,
+        store
+            .read("builtin")
+            .await
+            .into_test_result()?
+            .into_test_result()?
+            .revision,
         BundleRevision(2)
     );
     Ok(())
 }
 
 #[tokio::test]
-async fn store_refusal_stops_authoring_before_staging_anything() -> Result<(), Box<dyn std::error::Error>> {
+async fn store_refusal_stops_authoring_before_staging_anything()
+-> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryStore::default();
     store.fail_reads.store(true, Ordering::SeqCst);
     let temp = tempfile::tempdir().into_test_result()?;
@@ -360,14 +390,18 @@ async fn store_refusal_stops_authoring_before_staging_anything() -> Result<(), B
 }
 
 #[tokio::test]
-async fn authoring_rejects_traversal_before_writing_beyond_scratch() -> Result<(), Box<dyn std::error::Error>> {
+async fn authoring_rejects_traversal_before_writing_beyond_scratch()
+-> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryStore::default();
     let existing = content(
         BundleDocument::Workflow,
         "---\nname: escape\ndescription: stored\n---\nstored body\n",
         vec![],
     );
-    store.publish("../escape", None, &existing).await.into_test_result()?;
+    store
+        .publish("../escape", None, &existing)
+        .await
+        .into_test_result()?;
     let temp = tempfile::tempdir().into_test_result()?;
     let scratch = temp.path().join("scratch");
     let spec = BundleSpec {
@@ -397,7 +431,8 @@ async fn authoring_rejects_traversal_before_writing_beyond_scratch() -> Result<(
 }
 
 #[tokio::test]
-async fn legacy_import_rejects_oversized_files_before_copying_them() -> Result<(), Box<dyn std::error::Error>> {
+async fn legacy_import_rejects_oversized_files_before_copying_them()
+-> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryStore::default();
     let temp = tempfile::tempdir().into_test_result()?;
     let legacy = temp.path().join("legacy");
@@ -447,7 +482,8 @@ async fn legacy_import_rejects_oversized_files_before_copying_them() -> Result<(
 }
 
 #[tokio::test]
-async fn legacy_import_rejects_too_deep_trees_before_copying_them() -> Result<(), Box<dyn std::error::Error>> {
+async fn legacy_import_rejects_too_deep_trees_before_copying_them()
+-> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryStore::default();
     let temp = tempfile::tempdir().into_test_result()?;
     let legacy = temp.path().join("legacy");
@@ -493,7 +529,8 @@ async fn legacy_import_rejects_too_deep_trees_before_copying_them() -> Result<()
 }
 
 #[tokio::test]
-async fn stored_bundle_over_the_requested_budget_is_rejected_before_staging() -> Result<(), Box<dyn std::error::Error>> {
+async fn stored_bundle_over_the_requested_budget_is_rejected_before_staging()
+-> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryStore::default();
     let default_limits = BundleLimits::default();
     let oversized = UserBundle::new(
@@ -511,7 +548,10 @@ async fn stored_bundle_over_the_requested_budget_is_rejected_before_staging() ->
         },
     )
     .into_test_result()?;
-    store.publish("demo", None, &oversized).await.into_test_result()?;
+    store
+        .publish("demo", None, &oversized)
+        .await
+        .into_test_result()?;
     let temp = tempfile::tempdir().into_test_result()?;
     let spec = BundleSpec {
         slug: "demo".into(),
@@ -537,10 +577,13 @@ async fn stored_bundle_over_the_requested_budget_is_rejected_before_staging() ->
     ));
     assert!(!temp.path().join("demo").exists());
     assert_eq!(
-        store.read("demo").await.into_test_result()?.into_test_result()?.revision,
+        store
+            .read("demo")
+            .await
+            .into_test_result()?
+            .into_test_result()?
+            .revision,
         BundleRevision(1)
     );
     Ok(())
 }
-//! Store-backed authoring, install, import, and removal behavior.
-
