@@ -6,8 +6,8 @@ use tinyskills::{
     AuthoringError, BundleDocument, BundleSpec, DescriptionTooLong, FrontmatterTooLarge,
     MAX_DESCRIPTION_LEN, MAX_NAME_LEN, PunctuationRule, ScaffoldOptions, SlugError, SlugRules,
     check_frontmatter_size, parse_skill_str, render_workflow_frontmatter, render_workflow_md,
-    scaffold_bundle, slugify, slugify_with, validate_description, validate_description_chars,
-    validate_display_name, validate_slug, yaml_scalar,
+    scaffold_bundle_in_scratch, slugify, slugify_with, validate_description,
+    validate_description_chars, validate_display_name, validate_slug, yaml_scalar,
 };
 
 fn spec(slug: &str) -> BundleSpec {
@@ -111,7 +111,7 @@ fn minimal_frontmatter_omits_optional_blocks() {
 fn scaffold_creates_document_and_resource_dirs() -> Result<(), Box<dyn std::error::Error>> {
     let temp = tempfile::tempdir()?;
     let root = temp.path().join("skills");
-    let outcome = scaffold_bundle(&root, &spec("demo"), &ScaffoldOptions::default())?;
+    let outcome = scaffold_bundle_in_scratch(&root, &spec("demo"), &ScaffoldOptions::default())?;
     assert_eq!(outcome.slug, "demo");
     assert!(outcome.document.ends_with("demo/WORKFLOW.md"));
     assert!(outcome.dir.starts_with(fs::canonicalize(&root)?));
@@ -121,7 +121,7 @@ fn scaffold_creates_document_and_resource_dirs() -> Result<(), Box<dyn std::erro
     let found = tinyskills::scan_root(&root, tinyskills::SkillScope::User);
     assert_eq!(found[0].dir_name, "demo");
 
-    let as_skill = scaffold_bundle(
+    let as_skill = scaffold_bundle_in_scratch(
         &root,
         &spec("other"),
         &ScaffoldOptions {
@@ -137,8 +137,8 @@ fn scaffold_creates_document_and_resource_dirs() -> Result<(), Box<dyn std::erro
 fn scaffold_rejects_collisions_and_missing_edit_targets() -> Result<(), Box<dyn std::error::Error>>
 {
     let temp = tempfile::tempdir()?;
-    scaffold_bundle(temp.path(), &spec("demo"), &ScaffoldOptions::default())?;
-    let error = scaffold_bundle(temp.path(), &spec("demo"), &ScaffoldOptions::default())
+    scaffold_bundle_in_scratch(temp.path(), &spec("demo"), &ScaffoldOptions::default())?;
+    let error = scaffold_bundle_in_scratch(temp.path(), &spec("demo"), &ScaffoldOptions::default())
         .err()
         .ok_or("collision accepted")?;
     assert!(matches!(error, AuthoringError::AlreadyExists { .. }));
@@ -148,7 +148,7 @@ fn scaffold_rejects_collisions_and_missing_edit_targets() -> Result<(), Box<dyn 
             .starts_with("skill 'demo' already exists at ")
     );
 
-    let error = scaffold_bundle(temp.path(), &spec("ghost"), &edit())
+    let error = scaffold_bundle_in_scratch(temp.path(), &spec("ghost"), &edit())
         .err()
         .ok_or("edit of missing accepted")?;
     assert!(matches!(error, AuthoringError::NotFound { .. }));
@@ -160,9 +160,10 @@ fn scaffold_rejects_collisions_and_missing_edit_targets() -> Result<(), Box<dyn 
 fn scaffold_rejects_unsafe_slugs_and_bad_descriptions() -> Result<(), Box<dyn std::error::Error>> {
     let temp = tempfile::tempdir()?;
     for slug in ["", ".", "..", "../x", "a/b", "a\\b", "/abs"] {
-        let error = scaffold_bundle(temp.path(), &spec(slug), &ScaffoldOptions::default())
-            .err()
-            .ok_or("unsafe slug accepted")?;
+        let error =
+            scaffold_bundle_in_scratch(temp.path(), &spec(slug), &ScaffoldOptions::default())
+                .err()
+                .ok_or("unsafe slug accepted")?;
         assert!(
             matches!(error, AuthoringError::InvalidSlug { .. }),
             "{slug}"
@@ -173,7 +174,7 @@ fn scaffold_rejects_unsafe_slugs_and_bad_descriptions() -> Result<(), Box<dyn st
         ..spec("demo")
     };
     assert!(matches!(
-        scaffold_bundle(temp.path(), &blank, &ScaffoldOptions::default()),
+        scaffold_bundle_in_scratch(temp.path(), &blank, &ScaffoldOptions::default()),
         Err(AuthoringError::EmptyDescription)
     ));
     assert!(!temp.path().join("demo").exists());
@@ -193,7 +194,7 @@ fn edit_preserves_body_and_retires_the_other_document() -> Result<(), Box<dyn st
         description: "new description".to_owned(),
         ..spec("demo")
     };
-    let outcome = scaffold_bundle(temp.path(), &updated, &edit())?;
+    let outcome = scaffold_bundle_in_scratch(temp.path(), &updated, &edit())?;
     let written = fs::read_to_string(&outcome.document)?;
     assert!(written.contains("description: new description"));
     assert!(written.ends_with("\nHand written instructions.\n"));
@@ -209,7 +210,7 @@ fn edit_refuses_to_overwrite_an_unparseable_body() -> Result<(), Box<dyn std::er
     let dir = temp.path().join("broken");
     fs::create_dir_all(&dir)?;
     fs::write(dir.join("SKILL.md"), "---\nname: broken\ndescription: x\n")?;
-    let error = scaffold_bundle(temp.path(), &spec("broken"), &edit())
+    let error = scaffold_bundle_in_scratch(temp.path(), &spec("broken"), &edit())
         .err()
         .ok_or("edit accepted")?;
     assert!(
@@ -240,7 +241,7 @@ fn edit_refuses_unparseable_target_even_when_fallback_is_valid()
         dir.join("SKILL.md"),
         "---\nname: broken\ndescription: old\n---\n\nValid body.\n",
     )?;
-    let error = scaffold_bundle(temp.path(), &spec("broken"), &edit())
+    let error = scaffold_bundle_in_scratch(temp.path(), &spec("broken"), &edit())
         .err()
         .ok_or("edit accepted")?;
     assert!(
@@ -271,10 +272,95 @@ fn edit_finds_bundles_under_legacy_roots() -> Result<(), Box<dyn std::error::Err
         legacy_roots: vec![legacy.clone()],
         ..ScaffoldOptions::default()
     };
-    let outcome = scaffold_bundle(&temp.path().join("primary"), &spec("old-one"), &options)?;
-    assert_eq!(outcome.dir, fs::canonicalize(&dir)?);
+    let outcome =
+        scaffold_bundle_in_scratch(&temp.path().join("primary"), &spec("old-one"), &options)?;
+    assert_eq!(
+        outcome.dir,
+        fs::canonicalize(temp.path().join("primary/old-one"))?
+    );
     assert!(outcome.document.ends_with("old-one/WORKFLOW.md"));
-    assert!(!temp.path().join("primary").join("old-one").exists());
+    assert!(
+        dir.join("SKILL.md").is_file(),
+        "legacy source remains untouched"
+    );
+    assert!(outcome.dir.join("WORKFLOW.md").is_file());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn edit_refuses_symlinks_in_read_only_legacy_sources() -> Result<(), Box<dyn std::error::Error>> {
+    let temp = tempfile::tempdir()?;
+    let legacy = temp.path().join("legacy");
+    let dir = legacy.join("old-one");
+    let outside = tempfile::tempdir()?;
+    fs::create_dir_all(&dir)?;
+    fs::write(
+        dir.join("SKILL.md"),
+        "---\nname: old-one\ndescription: d\n---\nbody\n",
+    )?;
+    fs::write(outside.path().join("secret.md"), "outside")?;
+    std::os::unix::fs::symlink(outside.path().join("secret.md"), dir.join("references.md"))?;
+    let options = ScaffoldOptions {
+        overwrite: true,
+        legacy_roots: vec![legacy],
+        ..ScaffoldOptions::default()
+    };
+    let result =
+        scaffold_bundle_in_scratch(&temp.path().join("primary"), &spec("old-one"), &options);
+    assert!(matches!(result, Err(AuthoringError::SymlinkedDir { .. })));
+    assert!(
+        !temp
+            .path()
+            .join("primary/old-one")
+            .join("references.md")
+            .exists()
+    );
+    assert_eq!(
+        fs::read_to_string(outside.path().join("secret.md"))?,
+        "outside"
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn edit_refuses_non_file_entries_in_read_only_legacy_sources()
+-> Result<(), Box<dyn std::error::Error>> {
+    // Linux's Unix-domain socket path limit is short enough that the hosted
+    // compiler scratch directory plus the fixture path can exceed it. Use
+    // shared memory when available; other Unix platforms keep their normal
+    // temporary directory, which has a shorter path.
+    let temp = if cfg!(target_os = "linux") && std::path::Path::new("/dev/shm").is_dir() {
+        tempfile::tempdir_in("/dev/shm")?
+    } else {
+        tempfile::tempdir()?
+    };
+    let legacy = temp.path().join("legacy");
+    let dir = legacy.join("old-one");
+    fs::create_dir_all(&dir)?;
+    fs::write(
+        dir.join("SKILL.md"),
+        "---\nname: old-one\ndescription: d\n---\nbody\n",
+    )?;
+    let _socket = std::os::unix::net::UnixListener::bind(dir.join("socket"))?;
+    let options = ScaffoldOptions {
+        overwrite: true,
+        legacy_roots: vec![legacy],
+        ..ScaffoldOptions::default()
+    };
+    let result =
+        scaffold_bundle_in_scratch(&temp.path().join("primary"), &spec("old-one"), &options);
+    assert!(matches!(result, Err(AuthoringError::Io { .. })));
+    let scratch_bundle = temp.path().join("primary/old-one");
+    assert!(scratch_bundle.is_dir());
+    assert!(!scratch_bundle.join("socket").exists());
+    assert!(dir.join("socket").exists());
+    let original_document = fs::read(dir.join("SKILL.md"))?;
+    let copied_document = scratch_bundle.join("SKILL.md");
+    if copied_document.exists() {
+        assert_eq!(fs::read(copied_document)?, original_document);
+    }
     Ok(())
 }
 
@@ -284,7 +370,7 @@ fn scaffold_refuses_a_symlinked_bundle_dir() -> Result<(), Box<dyn std::error::E
     let temp = tempfile::tempdir()?;
     let outside = tempfile::tempdir()?;
     std::os::unix::fs::symlink(outside.path(), temp.path().join("demo"))?;
-    let error = scaffold_bundle(temp.path(), &spec("demo"), &edit())
+    let error = scaffold_bundle_in_scratch(temp.path(), &spec("demo"), &edit())
         .err()
         .ok_or("symlink accepted")?;
     assert!(matches!(error, AuthoringError::SymlinkedDir { .. }));

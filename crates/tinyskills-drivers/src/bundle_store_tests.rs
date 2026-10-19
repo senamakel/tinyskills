@@ -497,6 +497,7 @@ async fn custom_bundle_limits_round_trip_above_default_file_count() {
             max_file_bytes: 32,
             max_total_bytes: 64,
             max_path_bytes: 128,
+            max_depth: BundleLimits::default().max_depth,
         },
     )
     .unwrap();

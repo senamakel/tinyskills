@@ -31,12 +31,13 @@ for skill in skills {
 - recursive, deterministic scans that reject symlinked directories/manifests
 - explicit scope precedence for builtin, legacy, user, project, and profile roots
 - traversal-, symlink-, size-, and UTF-8-safe resource reads
-- validated materialization and tamper detection for compile-time bundles
+- validated compile-time bundle content for store publication
 - network-free registry catalog logic: Hermes catalog parsing, `SKILL.md` download-URL derivation (GitHub, ClawHub, skills.sh), entry lookup, and search filtering
 - opt-in collision policies (`CollisionPolicy`, `TieBreak::LastWins`, excluded scopes) so root order can decide equal-scope ties
-- authoring: `slugify`, YAML rendering, and `scaffold_bundle` (containment-checked create/edit with body preservation and resource dirs)
-- defensive `remove_bundle` (slug validation, symlink rejection, canonical containment)
-- fetched single-document installs: `validate_fetched_document`, `redact_url`, and an atomic `write_installed_document` with rollback
+- store-backed authoring: `scaffold_bundle_in_store` stages in a caller-owned temporary directory, reads the store as the edit source of truth, and publishes with an expected revision; legacy roots are read-only import sources
+- store-backed fetched and compiled installs: `install_document_in_store` and `install_compiled_in_store` publish validated bundle content without a local persistent-root fallback
+- revision-checked deletion: `remove_bundle_from_store`
+- filesystem staging helper: `scaffold_bundle_in_scratch` only changes caller-provided scratch space; it does not provide persistent storage
 - `TriggerPattern` parsing and matching for `triggers:` frontmatter
 - `read_document` for size-bounded, symlink-free, UTF-8 reads of documents and sidecars
 - supply-chain scan of untrusted skill text: `scan_skill` over a `ScanDocument` and its bundled files returns `pass`/`warn`/`block` findings (invisible/bidi/zero-width code points, hard-coded credentials, and escaping resource paths block; agent-addressed text, fetch-and-exec pipelines, and undeclared MCP references warn), plus `sanitize_catalogue_text` for rendering untrusted text into a prompt as data
@@ -80,11 +81,11 @@ error sources, and check that authority even for missing items and empty pages.
 A committed head is authoritative; later cleanup failures must not imply that
 publication rolled back. `Arc` forwarding preserves this contract.
 
-This crate does not yet provide a native document/blob implementation of
-`BundleStore`, a compiled module for these operations, desktop import receipts,
-or a read-only materialization cache. The fetched-catalog `CatalogStore` is a
-different contract. The staged owner design and remaining authority requirements
-are described in [the user bundle plan](docs/plans/user-bundles-cloud.md).
+This crate provides store-backed authoring and installation entrypoints over
+the `BundleStore` contract, but no document/blob backend implementation or
+compiled module. Hosts bind the store to their chosen authority and backend.
+`materialize_tree` remains the explicit filesystem seam for building a local
+discovery cache. The fetched-catalog `CatalogStore` is a separate contract.
 
 ## Which parser
 
