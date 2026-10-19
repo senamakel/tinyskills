@@ -531,7 +531,10 @@ async fn stream_listing_ignores_names_outside_the_encoded_run_id_format() {
         .await
         .unwrap();
 
-    assert!(store.list(None, 10).await.unwrap().is_empty());
+    assert_eq!(
+        store.list(None, 10).await.unwrap(),
+        Vec::<tinyskills::run_log::ScannedRun>::new()
+    );
 }
 
 #[tokio::test]
