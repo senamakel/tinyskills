@@ -3,8 +3,8 @@
 #[path = "support/store_entrypoint_support.rs"]
 mod support;
 
-use support::{MemoryStore, TestResultExt, content};
 use std::sync::atomic::Ordering;
+use support::{MemoryStore, TestResultExt, content};
 use tinyskills::{
     BundleDocument, BundleLimits, BundleRevision, BundleSpec, BundledFile, BundledSkill,
     install_compiled_in_store, install_document_in_store, remove_bundle_from_store,

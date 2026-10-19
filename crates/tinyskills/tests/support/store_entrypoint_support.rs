@@ -8,7 +8,7 @@ use std::{
 
 use tinyskills::{
     BundleDocument, BundleFuture, BundleRevision, BundleStore, BundleStoreError, BundleSummary,
-    BundledFile, BundledSkill, StoredBundle, UserBundle,
+    StoredBundle, UserBundle,
 };
 
 pub trait TestResultExt<T> {
@@ -124,8 +124,4 @@ pub fn content(
     resources: Vec<tinyskills::BundleFile>,
 ) -> Result<UserBundle, tinyskills::BundleContentError> {
     UserBundle::new(primary, document.to_owned(), resources, Default::default())
-}
-
-pub fn compiled_skill(dir_name: &'static str, files: &'static [BundledFile]) -> BundledSkill {
-    BundledSkill { dir_name, files }
 }
