@@ -1,4 +1,4 @@
-//! Validation and materialization for skills compiled into a host binary.
+//! Validation for skills compiled into a host binary.
 
 use crate::model::{SKILL_MD, WORKFLOW_MD};
 use sha2::{Digest, Sha256};

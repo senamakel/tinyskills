@@ -25,7 +25,6 @@ mod materialize;
 mod model;
 #[cfg(feature = "registry")]
 mod registry;
-mod remove;
 mod resource;
 pub mod run_log;
 mod scan;

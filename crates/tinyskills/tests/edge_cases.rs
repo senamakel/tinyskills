@@ -1,7 +1,7 @@
 //! Failure-path and compatibility coverage for the portable API.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tinyskills::{
     BundledFile, BundledSkill, DiscoveryRoot, Skill, SkillScope, discover, parse_skill_str,

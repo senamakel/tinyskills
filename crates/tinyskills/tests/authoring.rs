@@ -6,7 +6,7 @@ use tinyskills::{
     AuthoringError, BundleDocument, BundleSpec, DescriptionTooLong, FrontmatterTooLarge,
     MAX_DESCRIPTION_LEN, MAX_NAME_LEN, PunctuationRule, ScaffoldOptions, SlugError, SlugRules,
     check_frontmatter_size, parse_skill_str, render_workflow_frontmatter, render_workflow_md,
-    scaffold_bundle, slugify, slugify_with, validate_description, validate_description_chars,
+    scaffold_bundle_in_scratch, slugify, slugify_with, validate_description, validate_description_chars,
     validate_display_name, validate_slug, yaml_scalar,
 };
 
