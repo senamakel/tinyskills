@@ -129,6 +129,27 @@ fn publication_budgets_include_primary_file_and_utf8_bytes() -> TestResult {
 }
 
 #[test]
+fn publication_budget_rejects_paths_past_the_depth_limit() -> TestResult {
+    let limits = BundleLimits {
+        max_files: 2,
+        max_depth: 2,
+        ..BundleLimits::default()
+    };
+    assert_eq!(
+        UserBundle::new(
+            BundleDocument::Skill,
+            String::new(),
+            vec![resource("a/b/c.txt", b"x")],
+            limits,
+        )
+        .err()
+        .ok_or("expected depth rejection")?,
+        BundleContentError::Limit("depth")
+    );
+    Ok(())
+}
+
+#[test]
 fn manifest_and_digest_are_order_independent_and_cover_bytes_names_and_primary() -> TestResult {
     let a = bundle(vec![
         resource("refs/z", b"z"),

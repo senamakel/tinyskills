@@ -161,13 +161,34 @@ pub async fn install_compiled_in_store<S: BundleStore + ?Sized>(
             } else {
                 BundleDocument::Workflow
             };
-            let document = bundle
+            let primary_file = bundle
                 .files
                 .iter()
                 .find(|file| file.path == primary.file_name())
-                .ok_or(BundleOperationError::InvalidCompiledBundle)?
-                .contents
-                .to_owned();
+                .ok_or(BundleOperationError::InvalidCompiledBundle)?;
+            let limits = BundleLimits::default();
+            if bundle.files.len() > limits.max_files {
+                return Err(crate::BundleContentError::Limit("file count").into());
+            }
+            let mut total = 0usize;
+            for file in bundle.files {
+                if file.path.len() > limits.max_path_bytes {
+                    return Err(crate::BundleContentError::Limit("path bytes").into());
+                }
+                if file.path.split('/').count() > limits.max_depth {
+                    return Err(crate::BundleContentError::Limit("depth").into());
+                }
+                if file.contents.len() > limits.max_file_bytes {
+                    return Err(crate::BundleContentError::Limit("file bytes").into());
+                }
+                total = total
+                    .checked_add(file.contents.len())
+                    .ok_or(crate::BundleContentError::Limit("total bytes"))?;
+                if total > limits.max_total_bytes {
+                    return Err(crate::BundleContentError::Limit("total bytes").into());
+                }
+            }
+            let document = primary_file.contents.to_owned();
             let resources = bundle
                 .files
                 .iter()
@@ -177,7 +198,7 @@ pub async fn install_compiled_in_store<S: BundleStore + ?Sized>(
                     bytes: file.contents.as_bytes().to_vec(),
                 })
                 .collect();
-            let content = bundle_with_exact_limits(primary, document, resources)?;
+            let content = UserBundle::new(primary, document, resources, limits)?;
             if let Some(existing) = store.read(bundle.dir_name).await? {
                 if existing.content.digest() == content.digest() {
                     return Ok(PublishedBundle {
@@ -244,12 +265,13 @@ fn validate_stored_bundle(
 ) -> Result<UserBundle, BundleOperationError> {
     check_file_limits(bundle.files(), limits)?;
     let primary = bundle.primary();
-    let document = std::str::from_utf8(
+    let document = String::from_utf8(
         bundle
             .file(primary.file_name())
-            .ok_or(crate::BundleContentError::MissingDocument)?,
-    )?
-    .to_owned();
+            .ok_or(crate::BundleContentError::MissingDocument)?
+            .to_vec(),
+    )
+    .map_err(std::io::Error::other)?;
     let resources = bundle
         .files()
         .iter()
@@ -373,7 +395,7 @@ fn read_bundle_dir(
         total = total
             .checked_add(bytes.len())
             .ok_or(crate::BundleContentError::Limit("total bytes"))?;
-        if path == document_path.0 {
+        if path.as_path() == document_path.0.as_path() {
             document = Some(String::from_utf8(bytes).map_err(std::io::Error::other)?);
         } else if name != preferred && name != fallback {
             resources.push(BundleFile { path: name, bytes });
