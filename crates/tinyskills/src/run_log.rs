@@ -25,8 +25,10 @@ const RESULT_MARKER: &str = "--- result ---";
 
 #[path = "run_log_summary.rs"]
 mod summary;
+pub(crate) use summary::read_run_log_header_identity;
+#[cfg(test)]
+pub(crate) use summary::read_run_log_header_identity_from_reader;
 pub use summary::{RunLogSummary, read_run_log_summary, read_run_log_summary_from_text};
-pub(crate) use summary::{read_run_log_header_identity, read_run_log_header_identity_from_reader};
 
 /// `<workspace>/skills/.runs`.
 #[must_use]

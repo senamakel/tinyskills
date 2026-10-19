@@ -180,7 +180,7 @@ async fn file_store_rejects_ids_that_exceed_encoded_filename_limit() {
     assert!(matches!(
         store
             .start(start(
-                &workflow_id,
+                workflow_id,
                 &run_id,
                 "2026-01-01T00:00:00Z",
                 "prompt"
