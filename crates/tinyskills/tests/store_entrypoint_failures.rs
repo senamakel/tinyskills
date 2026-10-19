@@ -157,3 +157,110 @@ async fn compiled_workflow_install_preserves_its_primary_document()
     assert_eq!(stored.content.primary(), BundleDocument::Workflow);
     Ok(())
 }
+
+#[tokio::test]
+async fn stored_content_is_checked_against_each_requested_limit()
+-> Result<(), Box<dyn std::error::Error>> {
+    let document = "---\nname: demo\ndescription: valid\n---\nbody\n";
+    let cases = [
+        (
+            tinyskills::BundleLimits {
+                max_files: 1,
+                ..Default::default()
+            },
+            "file count",
+        ),
+        (
+            tinyskills::BundleLimits {
+                max_path_bytes: 5,
+                ..Default::default()
+            },
+            "path bytes",
+        ),
+        (
+            tinyskills::BundleLimits {
+                max_depth: 1,
+                ..Default::default()
+            },
+            "depth",
+        ),
+        (
+            tinyskills::BundleLimits {
+                max_total_bytes: document.len(),
+                ..Default::default()
+            },
+            "total bytes",
+        ),
+    ];
+    for (limits, expected_limit) in cases {
+        let store = MemoryStore::default();
+        let stored = content(
+            BundleDocument::Skill,
+            document,
+            vec![tinyskills::BundleFile {
+                path: "references/guide.md".into(),
+                bytes: b"resource".to_vec(),
+            }],
+        )?;
+        store.publish("demo", None, &stored).await?;
+        let scratch = tempfile::tempdir()?;
+        let spec = BundleSpec {
+            slug: "demo".into(),
+            description: "edited".into(),
+            ..BundleSpec::default()
+        };
+        let result = scaffold_bundle_in_store(
+            &store,
+            scratch.path(),
+            &spec,
+            &tinyskills::ScaffoldOptions {
+                overwrite: true,
+                limits,
+                ..Default::default()
+            },
+            Some(BundleRevision(1)),
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(tinyskills::BundleOperationError::Content(
+                tinyskills::BundleContentError::Limit(limit)
+            )) if limit == expected_limit
+        ));
+        assert!(!scratch.path().join("demo").exists());
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn legacy_import_rejects_a_symlinked_root_before_staging()
+-> Result<(), Box<dyn std::error::Error>> {
+    let store = MemoryStore::default();
+    let temp = tempfile::tempdir()?;
+    let outside = tempfile::tempdir()?;
+    std::os::unix::fs::symlink(outside.path(), temp.path().join("legacy"))?;
+    let spec = BundleSpec {
+        slug: "demo".into(),
+        description: "new".into(),
+        ..BundleSpec::default()
+    };
+    let result = scaffold_bundle_in_store(
+        &store,
+        temp.path(),
+        &spec,
+        &tinyskills::ScaffoldOptions {
+            overwrite: true,
+            legacy_roots: vec![temp.path().join("legacy")],
+            ..Default::default()
+        },
+        None,
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(tinyskills::BundleOperationError::Io(_))
+    ));
+    assert!(!temp.path().join("demo").exists());
+    Ok(())
+}
