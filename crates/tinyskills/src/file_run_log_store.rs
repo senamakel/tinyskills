@@ -1,8 +1,8 @@
 //! The file-backed implementation of the run-log persistence contract.
 
-use std::io::{self, Read, Write};
 use std::collections::HashMap;
 use std::future::Future;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};

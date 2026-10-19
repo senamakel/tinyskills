@@ -183,3 +183,66 @@ async fn failed_start_cleanup_preserves_a_replacement_run() {
     assert_ne!(file_generation(&path).unwrap(), failed_generation);
     assert!(read_file_summary(&path).unwrap().is_some());
 }
+
+#[tokio::test]
+async fn tail_never_reads_replacement_bytes_with_the_previous_generation_cursor() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let first_handle = std::sync::Arc::new(FileRunLogStore::new(temp.path()));
+    let second_handle = FileRunLogStore::new(temp.path());
+    let run = RunLogStart {
+        workflow_id: "workflow-a",
+        run_id: "run-tail-generation-race",
+        started: "2026-01-01T00:00:00Z",
+        inputs: &INPUTS,
+        task_prompt: "original payload",
+    };
+    first_handle.start(run.clone()).await.unwrap();
+    let stale_cursor = first_handle.tail(run.run_id, None, 1).await.unwrap().cursor;
+    let path = file_store_path(temp.path(), run.workflow_id, run.run_id, "");
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
+    let (resume_tx, resume_rx) = tokio::sync::oneshot::channel();
+    let tail_store = std::sync::Arc::clone(&first_handle);
+    let run_id = run.run_id.to_owned();
+    let tail = tokio::spawn(async move {
+        let before_read = Box::pin(async move {
+            ready_tx.send(()).unwrap();
+            resume_rx.await.unwrap();
+        });
+        tail_with_interleave(
+            &tail_store,
+            &run_id,
+            Some(&stale_cursor),
+            16 * 1024,
+            before_read,
+        )
+        .await
+    });
+
+    ready_rx.await.unwrap();
+    let lifecycle_is_excluded = run_lifecycle_lock_is_held(&path);
+    if !lifecycle_is_excluded {
+        assert!(second_handle.clear(run.run_id).await.unwrap());
+        second_handle
+            .start(RunLogStart {
+                started: "2026-01-01T00:00:01Z",
+                task_prompt: "replacement payload",
+                ..run.clone()
+            })
+            .await
+            .unwrap();
+        second_handle
+            .append(run.run_id, "replacement-only-tail-marker")
+            .await
+            .unwrap();
+    }
+    resume_tx.send(()).unwrap();
+
+    match tail.await.unwrap() {
+        Ok(page) => assert!(
+            !page.content.contains("replacement-only-tail-marker"),
+            "tail must not return replacement bytes under the previous generation cursor"
+        ),
+        Err(RunLogError::InvalidCursor) => {}
+        Err(error) => panic!("unexpected tail error: {error}"),
+    }
+}
