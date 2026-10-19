@@ -396,8 +396,17 @@ pub fn read_run_log_slice(
             "cursor is inside a UTF-8 scalar",
         ));
     }
+    if max_bytes == 0 {
+        return Ok(RunLogSlice {
+            offset,
+            bytes_read: 0,
+            content: String::new(),
+            eof: false,
+            complete: false,
+        });
+    }
     f.seek(SeekFrom::Start(offset))?;
-    let target = max_bytes.max(1);
+    let target = max_bytes;
     let want = usize::try_from((file_size - offset).min(target as u64)).unwrap_or(target);
     let mut buf = vec![0u8; want];
     f.read_exact(&mut buf)?;

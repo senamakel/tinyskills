@@ -140,6 +140,31 @@ async fn file_store_zero_byte_tail_does_not_advance_its_cursor() {
 }
 
 #[tokio::test]
+async fn file_store_repairs_stale_summary_after_legacy_append() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let store = FileRunLogStore::new(temp.path());
+    store
+        .start(start(
+            "workflow-a",
+            "run-sidecar123",
+            "2026-01-01T00:00:00Z",
+            "prompt",
+        ))
+        .await
+        .unwrap();
+    let path = PathBuf::from(&store.list(None, 10).await.unwrap().remove(0).log_path);
+
+    crate::run_log::write_footer(&path, "DONE", 23, "2026-01-01T00:00:01Z", "result").unwrap();
+
+    let runs = store.list(None, 10).await.unwrap();
+    assert_eq!(runs[0].status, "DONE");
+    assert_eq!(runs[0].duration_ms, Some(23));
+    let page = store.tail("run-sidecar123", None, 4096).await.unwrap();
+    assert!(page.complete);
+    assert!(page.content.contains("result"));
+}
+
+#[tokio::test]
 async fn file_store_rejects_bad_ids_missing_runs_and_stale_cursors() {
     let temp = tempfile::TempDir::new().unwrap();
     let store = FileRunLogStore::new(temp.path());
