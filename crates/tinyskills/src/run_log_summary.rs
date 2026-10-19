@@ -1,6 +1,6 @@
 //! Bounded-memory metadata parsing for the human-readable run-log format.
 
-use std::io::{BufReader, Read};
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::ScannedRun;
 
 const RESULT_MARKER: &str = "--- result ---";
+const MAX_RUN_LOG_IDENTITY_BYTES: u64 = 16 * 1024;
 
 /// Bounded-memory summary parsed from a run log.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +60,44 @@ pub fn read_run_log_summary(path: &Path) -> std::io::Result<Option<RunLogSummary
         }
     }
     Ok(fields.finish(&path.to_string_lossy()))
+}
+
+/// Read the workflow and run ids from the bounded prefix containing the log header.
+pub(crate) fn read_run_log_header_identity(
+    path: &Path,
+) -> std::io::Result<Option<(String, String)>> {
+    read_run_log_header_identity_from_reader(std::fs::File::open(path)?)
+}
+
+pub(crate) fn read_run_log_header_identity_from_reader(
+    reader: impl Read,
+) -> std::io::Result<Option<(String, String)>> {
+    let mut reader = BufReader::with_capacity(128, reader.take(MAX_RUN_LOG_IDENTITY_BYTES));
+    let mut workflow_id = None;
+    let mut run_id = None;
+    let mut line = String::new();
+    loop {
+        line.clear();
+        if reader.read_line(&mut line)? == 0 {
+            return Ok(None);
+        }
+        if line.starts_with("==== workflow_run:") {
+            workflow_id = Some(
+                line.trim_start_matches("==== workflow_run:")
+                    .trim()
+                    .trim_end_matches('=')
+                    .trim()
+                    .to_owned(),
+            );
+        } else if let Some((label, value)) = line.split_once(':')
+            && label.trim() == "run_id"
+        {
+            run_id = Some(value.trim().to_owned());
+        }
+        if let (Some(workflow_id), Some(run_id)) = (&workflow_id, &run_id) {
+            return Ok(Some((workflow_id.clone(), run_id.clone())));
+        }
+    }
 }
 
 /// Parse a summary from an already available textual header or append.
