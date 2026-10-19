@@ -102,18 +102,17 @@ fn content(
     primary: BundleDocument,
     document: &str,
     resources: Vec<tinyskills::BundleFile>,
-) -> UserBundle {
+) -> Result<UserBundle, tinyskills::BundleContentError> {
     UserBundle::new(
         primary,
         document.to_owned(),
         resources,
         BundleLimits::default(),
     )
-    .expect("valid test bundle")
 }
 
 #[tokio::test]
-async fn authoring_reads_store_content_preserves_resources_and_publishes_cas_revision() {
+async fn authoring_reads_store_content_preserves_resources_and_publishes_cas_revision() -> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryStore::default();
     let original = content(
         BundleDocument::Workflow,
@@ -122,12 +121,12 @@ async fn authoring_reads_store_content_preserves_resources_and_publishes_cas_rev
             path: "references/guide.md".into(),
             bytes: b"reference".to_vec(),
         }],
-    );
+    )?;
     assert_eq!(
-        store.publish("demo", None, &original).await.unwrap(),
+        store.publish("demo", None, &original).await?,
         BundleRevision(1)
     );
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempfile::tempdir()?;
     let spec = BundleSpec {
         slug: "demo".into(),
         description: "updated".into(),
@@ -144,16 +143,17 @@ async fn authoring_reads_store_content_preserves_resources_and_publishes_cas_rev
         Some(BundleRevision(1)),
     )
     .await
-    .unwrap();
+    ?;
     assert_eq!(outcome.revision, BundleRevision(2));
-    let stored = store.read("demo").await.unwrap().unwrap();
-    let document = std::str::from_utf8(stored.content.file("WORKFLOW.md").unwrap()).unwrap();
+    let stored = store.read("demo").await?.ok_or("expected stored bundle")?;
+    let document = std::str::from_utf8(stored.content.file("WORKFLOW.md").ok_or("missing workflow document")?)?;
     assert!(document.contains("keep body"));
     assert!(document.contains("description: updated"));
     assert_eq!(
         stored.content.file("references/guide.md"),
         Some(&b"reference"[..])
     );
+    Ok(())
 }
 
 #[tokio::test]
@@ -515,3 +515,5 @@ async fn stored_bundle_over_the_requested_budget_is_rejected_before_staging() {
         BundleRevision(1)
     );
 }
+//! Store-backed authoring, install, import, and removal behavior.
+
