@@ -98,7 +98,22 @@ pub fn write_header(
     inputs: &Value,
     task_prompt: &str,
 ) -> std::io::Result<()> {
-    let header = format!(
+    append_line(
+        path,
+        &format_header(workflow_id, run_id, started, inputs, task_prompt),
+    )
+}
+
+/// Format a run header in the same layout written by [`write_header`].
+#[must_use]
+pub fn format_header(
+    workflow_id: &str,
+    run_id: &str,
+    started: &str,
+    inputs: &Value,
+    task_prompt: &str,
+) -> String {
+    format!(
         "==== workflow_run: {workflow_id} ====\n\
          run_id : {run_id}\n\
          started: {started} UTC\n\
@@ -106,8 +121,7 @@ pub fn write_header(
          --- task prompt ---\n{task_prompt}\n\n\
          --- steps ---",
         inputs = serde_json::to_string(inputs).unwrap_or_default(),
-    );
-    append_line(path, &header)
+    )
 }
 
 /// Write the final footer: status, duration, and the final output text.
@@ -119,13 +133,16 @@ pub fn write_footer(
     finished: &str,
     output: &str,
 ) -> std::io::Result<()> {
-    let footer = format!(
+    append_line(path, &format_footer(status, elapsed_ms, finished, output))
+}
+
+pub(crate) fn format_footer(status: &str, elapsed_ms: u64, finished: &str, output: &str) -> String {
+    format!(
         "\n{RESULT_MARKER}\n\
          status  : {status}\n\
          duration: {elapsed_ms} ms\n\
          finished: {finished} UTC\n\n{output}\n",
-    );
-    append_line(path, &footer)
+    )
 }
 
 /// Detect the degenerate "same paragraph repeated many times in one
@@ -190,68 +207,75 @@ pub fn scan_runs(workspace: &Path, workflow_id: Option<&str>, limit: usize) -> V
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
-        let mut sid = String::new();
-        let mut rid = String::new();
-        let mut started = String::new();
-        let mut status = String::from("RUNNING");
-        let mut duration_ms: Option<u64> = None;
-        let mut finished: Option<String> = None;
-        let mut seen_result = false;
-        // Labels are right-padded (`status  : DONE`); split on the first `:`
-        // and trim both halves.
-        for line in text.lines() {
-            if line.starts_with("==== workflow_run:") {
-                sid = line
-                    .trim_start_matches("==== workflow_run:")
-                    .trim()
-                    .trim_end_matches('=')
-                    .trim()
-                    .to_string();
-                continue;
-            }
-            if line.starts_with(RESULT_MARKER) {
-                seen_result = true;
-                continue;
-            }
-            let Some((label_raw, value_raw)) = line.split_once(':') else {
-                continue;
-            };
-            let label = label_raw.trim();
-            let value = value_raw.trim();
-            match (label, seen_result) {
-                ("run_id", false) => rid = value.to_string(),
-                ("started", false) => started = value.to_string(),
-                ("status", true) => status = value.to_string(),
-                ("duration", true) => {
-                    if let Ok(n) = value.trim_end_matches(" ms").trim().parse::<u64>() {
-                        duration_ms = Some(n);
-                    }
-                }
-                ("finished", true) => {
-                    finished = Some(value.trim_end_matches(" UTC").trim().to_string());
-                }
-                _ => {}
-            }
+        if let Some(run) = parse_run_log_text(&text, &path.to_string_lossy())
+            && workflow_id.is_none_or(|want| run.workflow_id == want)
+        {
+            runs.push(run);
         }
-        if sid.is_empty() || rid.is_empty() {
-            continue;
-        }
-        if workflow_id.is_some_and(|want| sid != want) {
-            continue;
-        }
-        runs.push(ScannedRun {
-            run_id: rid,
-            workflow_id: sid,
-            started,
-            status,
-            duration_ms,
-            finished,
-            log_path: path.to_string_lossy().into_owned(),
-        });
     }
     runs.sort_by(|a, b| b.started.cmp(&a.started));
     runs.truncate(limit);
     runs
+}
+
+/// Parse one complete or currently-writing run log using the existing header
+/// and footer rules. `log_path` is retained for compatibility with the
+/// [`ScannedRun`] wire shape; storage-backed adapters may supply a stable URI.
+#[must_use]
+pub fn parse_run_log_text(text: &str, log_path: &str) -> Option<ScannedRun> {
+    let mut sid = String::new();
+    let mut rid = String::new();
+    let mut started = String::new();
+    let mut status = String::from("RUNNING");
+    let mut duration_ms: Option<u64> = None;
+    let mut finished: Option<String> = None;
+    let mut seen_result = false;
+    for line in text.lines() {
+        if line.starts_with("==== workflow_run:") {
+            sid = line
+                .trim_start_matches("==== workflow_run:")
+                .trim()
+                .trim_end_matches('=')
+                .trim()
+                .to_string();
+            continue;
+        }
+        if line.starts_with(RESULT_MARKER) {
+            seen_result = true;
+            continue;
+        }
+        let Some((label_raw, value_raw)) = line.split_once(':') else {
+            continue;
+        };
+        let label = label_raw.trim();
+        let value = value_raw.trim();
+        match (label, seen_result) {
+            ("run_id", false) => rid = value.to_string(),
+            ("started", false) => started = value.to_string(),
+            ("status", true) => status = value.to_string(),
+            ("duration", true) => {
+                if let Ok(n) = value.trim_end_matches(" ms").trim().parse::<u64>() {
+                    duration_ms = Some(n);
+                }
+            }
+            ("finished", true) => {
+                finished = Some(value.trim_end_matches(" UTC").trim().to_string());
+            }
+            _ => {}
+        }
+    }
+    if sid.is_empty() || rid.is_empty() {
+        return None;
+    }
+    Some(ScannedRun {
+        run_id: rid,
+        workflow_id: sid,
+        started,
+        status,
+        duration_ms,
+        finished,
+        log_path: log_path.to_owned(),
+    })
 }
 
 /// Resolve a run id to its log path by matching the `_<first 8 chars>.log`

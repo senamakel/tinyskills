@@ -64,7 +64,10 @@ fn schema_declares_the_v2_items_under_the_skills_owner() {
     assert_eq!(CATALOG_COLLECTION, "skills.catalogs");
     let schema = storage_schema();
     let names: Vec<_> = schema.items.iter().map(Item::name).collect();
-    assert_eq!(names, ["skills.catalogs", "skills/bundles"]);
+    assert_eq!(
+        names,
+        ["skills.catalogs", "skills/bundles", "skills/run_logs"]
+    );
     assert!(
         schema
             .items
