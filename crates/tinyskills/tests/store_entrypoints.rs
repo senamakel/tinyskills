@@ -379,8 +379,14 @@ async fn store_refusal_stops_authoring_before_staging_anything()
         description: "new".into(),
         ..BundleSpec::default()
     };
-    let result =
-        scaffold_bundle_in_store(&store, temp.path(), &spec, &Default::default(), None).await;
+    let result = scaffold_bundle_in_store(
+        &store,
+        temp.path(),
+        &spec,
+        &tinyskills::ScaffoldOptions::default(),
+        None,
+    )
+    .await;
     assert!(matches!(
         result,
         Err(tinyskills::BundleOperationError::Store(_))
