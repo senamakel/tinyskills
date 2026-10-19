@@ -345,9 +345,10 @@ fn edit_refuses_non_file_entries_in_read_only_legacy_sources()
         scaffold_bundle_in_scratch(&temp.path().join("primary"), &spec("old-one"), &options);
     assert!(matches!(result, Err(AuthoringError::Io { .. })));
     let scratch_bundle = temp.path().join("primary/old-one");
-    assert!(scratch_bundle.join("SKILL.md").is_file());
+    assert!(scratch_bundle.is_dir());
     assert!(!scratch_bundle.join("socket").exists());
     assert!(dir.join("socket").exists());
+    assert!(dir.join("SKILL.md").is_file());
     Ok(())
 }
 
