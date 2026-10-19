@@ -46,6 +46,12 @@ pub enum BundleOperationError {
 /// `scratch_root` is staging only; it is never used as a persistent fallback.
 /// An existing store head is authoritative. Legacy roots are read-only import
 /// sources and are consulted only when the store has no head.
+///
+/// # Errors
+///
+/// Returns an error when reading or publishing the store head, preparing the
+/// caller-owned staging tree, importing a legacy bundle, or validating the
+/// authored bundle fails.
 pub async fn scaffold_bundle_in_store<S: BundleStore + ?Sized>(
     store: &S,
     scratch_root: &Path,
@@ -72,10 +78,10 @@ pub async fn scaffold_bundle_in_store<S: BundleStore + ?Sized>(
     }
     if let Some(stored) = &current {
         write_staged_bundle(&stage, &stored.content)?;
-    } else if options.overwrite {
-        if let Some(legacy) = find_legacy_bundle(&options.legacy_roots, &spec.slug)? {
-            copy_legacy_bundle(&legacy, &stage)?;
-        }
+    } else if options.overwrite
+        && let Some(legacy) = find_legacy_bundle(&options.legacy_roots, &spec.slug)?
+    {
+        copy_legacy_bundle(&legacy, &stage)?;
     }
 
     let stage_options = ScaffoldOptions {
@@ -94,6 +100,11 @@ pub async fn scaffold_bundle_in_store<S: BundleStore + ?Sized>(
 }
 
 /// Install a validated fetched skill document if its slug is absent.
+///
+/// # Errors
+///
+/// Returns an error when the fetched document is invalid or the store refuses
+/// to read or publish its bundle.
 pub async fn install_document_in_store<S: BundleStore + ?Sized>(
     store: &S,
     bytes: &[u8],
@@ -184,6 +195,11 @@ pub async fn install_compiled_in_store<S: BundleStore + ?Sized>(
 }
 
 /// Remove a bundle only at the caller's observed revision.
+///
+/// # Errors
+///
+/// Returns an error when the identifier is invalid or the store refuses the
+/// conditional delete.
 pub async fn remove_bundle_from_store<S: BundleStore + ?Sized>(
     store: &S,
     id: &str,
@@ -244,7 +260,7 @@ fn bundle_with_exact_limits(
         max_file = max_file.max(file.bytes.len());
         max_path = max_path.max(file.path.len());
     }
-    Ok(UserBundle::new(
+    UserBundle::new(
         primary,
         document,
         resources,
@@ -254,7 +270,7 @@ fn bundle_with_exact_limits(
             max_total_bytes: total,
             max_path_bytes: max_path,
         },
-    )?)
+    )
 }
 
 fn walkdir(root: &Path) -> std::io::Result<Vec<std::path::PathBuf>> {
@@ -285,7 +301,7 @@ fn find_legacy_bundle(
         match fs::symlink_metadata(root) {
             Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
             Ok(_) => return Err(std::io::Error::other("legacy root is not a real directory")),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
         }
         let canonical_root = fs::canonicalize(root)?;

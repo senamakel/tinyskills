@@ -5,6 +5,8 @@ use tinyskills::{
     validate_fetched_document,
 };
 
+const VALID: &str = "---\nname: My Skill!\ndescription: does things\n---\n\nbody\n";
+
 #[test]
 fn redact_url_drops_userinfo_query_and_fragment() {
     assert_eq!(
