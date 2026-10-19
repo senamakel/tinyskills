@@ -161,6 +161,8 @@ pub struct ScaffoldOptions {
     pub legacy_roots: Vec<PathBuf>,
     /// Document filename to write.
     pub document: BundleDocument,
+    /// Resource count, size, path, and depth budget for store-backed imports.
+    pub limits: crate::BundleLimits,
 }
 
 /// Result of a successful [`scaffold_bundle_in_scratch`].

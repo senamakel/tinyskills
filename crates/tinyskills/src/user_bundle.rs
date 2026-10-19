@@ -25,6 +25,8 @@ pub struct BundleLimits {
     pub max_total_bytes: usize,
     /// Maximum bytes in one relative name.
     pub max_path_bytes: usize,
+    /// Maximum number of path segments from the bundle root to a file.
+    pub max_depth: usize,
 }
 
 impl Default for BundleLimits {
@@ -34,6 +36,7 @@ impl Default for BundleLimits {
             max_file_bytes: 16 * 1024 * 1024,
             max_total_bytes: 64 * 1024 * 1024,
             max_path_bytes: 1024,
+            max_depth: 64,
         }
     }
 }
@@ -106,6 +109,9 @@ impl UserBundle {
         for file in &resources {
             if file.path.len() > limits.max_path_bytes {
                 return Err(BundleContentError::Limit("path bytes"));
+            }
+            if file.path.split('/').count() > limits.max_depth {
+                return Err(BundleContentError::Limit("depth"));
             }
             if !file.path.split('/').all(portable_segment) {
                 return Err(BundleContentError::InvalidPath);
