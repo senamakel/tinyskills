@@ -30,7 +30,11 @@ impl FileRunLogStore {
     }
 
     fn backend(&self) -> String {
-        format!("file:{}", self.workspace.to_string_lossy())
+        let identity = self
+            .workspace
+            .canonicalize()
+            .unwrap_or_else(|_| self.workspace.clone());
+        format!("file:{}", hex(&Sha256::digest(identity.as_os_str().as_encoded_bytes())))
     }
 
     fn validate_id(value: &str) -> Result<(), RunLogError> {
@@ -82,7 +86,6 @@ impl RunLogStore for FileRunLogStore {
             let summary_generation = generation.clone();
             let path_for_task = path.clone();
             let workspace = self.workspace.clone();
-            let run_id = run.run_id.to_owned();
             let summary = run_log::RunLogSummary {
                 run: ScannedRun {
                     run_id: run.run_id.to_owned(),
@@ -104,37 +107,34 @@ impl RunLogStore for FileRunLogStore {
                     )
                 })?;
                 std::fs::create_dir_all(parent)?;
-                let marker = lock_path(&workspace, &run_id);
-                let marker_file = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&marker)?;
-                if exact_file_path(&workspace, &run_id).is_some() || path_for_task.exists() {
-                    drop(marker_file);
-                    let _ = std::fs::remove_file(marker);
+                if exact_file_path(&workspace, &summary.run.run_id).is_some()
+                    || path_for_task.exists()
+                {
                     return Err(io::Error::new(
                         io::ErrorKind::AlreadyExists,
                         "run already exists",
                     ));
                 }
-                let result = (|| {
-                    let mut file = std::fs::OpenOptions::new()
-                        .write(true)
-                        .create_new(true)
-                        .open(&path_for_task)?;
-                    file.write_all(header.as_bytes())?;
-                    file.write_all(b"\n")?;
-                    file.flush()
-                })();
-                if result.is_ok() {
-                    write_file_summary(&path_for_task, &summary, &summary_generation)?;
-                }
-                drop(marker_file);
-                if result.is_err() {
+                let mut file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path_for_task)?;
+                file.write_all(header.as_bytes())?;
+                file.write_all(b"\n")?;
+                file.flush()?;
+                let observed_len = header.len() as u64 + 1;
+                if let Err(error) = write_file_summary(
+                    &path_for_task,
+                    &summary,
+                    &summary_generation,
+                    observed_len,
+                ) {
+                    let _ = std::fs::remove_file(summary_path(&path_for_task));
+                    let _ = std::fs::remove_file(generation_path(&path_for_task));
                     let _ = std::fs::remove_file(&path_for_task);
+                    return Err(error);
                 }
-                let _ = std::fs::remove_file(marker);
-                result
+                Ok(())
             })
             .await
             .map_err(|error| RunLogError::Task(error.to_string()))??;
@@ -255,13 +255,14 @@ impl RunLogStore for FileRunLogStore {
             let workspace = self.workspace.clone();
             let run_id = run_id.to_owned();
             let existed = tokio::task::spawn_blocking(move || {
-                let Some(path) = exact_file_path(&workspace, &run_id) else {
-                    return Ok::<bool, io::Error>(false);
-                };
+                let path = exact_file_path(&workspace, &run_id).or_else(|| {
+                    let deterministic = file_store_path(&workspace, "", &run_id, "");
+                    deterministic.exists().then_some(deterministic)
+                });
+                let Some(path) = path else { return Ok::<bool, io::Error>(false) };
                 std::fs::remove_file(&path)?;
                 let _ = std::fs::remove_file(summary_path(&path));
                 let _ = std::fs::remove_file(generation_path(&path));
-                let _ = std::fs::remove_file(lock_path(&workspace, &run_id));
                 Ok(true)
             })
             .await
@@ -284,10 +285,7 @@ fn exact_file_path(workspace: &std::path::Path, run_id: &str) -> Option<PathBuf>
         if path.extension().and_then(|extension| extension.to_str()) != Some("log") {
             continue;
         }
-        if name.ends_with(&encoded_suffix) {
-            return Some(path);
-        }
-        if name.ends_with(&legacy_suffix) {
+        if name.ends_with(&encoded_suffix) || name.ends_with(&legacy_suffix) {
             legacy.push(path);
         }
     }
@@ -329,7 +327,7 @@ fn read_file_summary(path: &Path) -> io::Result<Option<run_log::RunLogSummary>> 
     let Some(summary) = run_log::read_run_log_summary(path)? else {
         return Ok(None);
     };
-    write_file_summary(path, &summary, &generation)?;
+    write_file_summary(path, &summary, &generation, observed_len)?;
     Ok(Some(summary))
 }
 
@@ -337,13 +335,14 @@ fn write_file_summary(
     path: &Path,
     summary: &run_log::RunLogSummary,
     generation: &str,
+    observed_len: u64,
 ) -> io::Result<()> {
     let destination = summary_path(path);
     let temporary = path.with_extension(format!("summary-{}.tmp", new_generation()));
     let bytes = serde_json::to_vec(&FileSummary {
         summary: summary.clone(),
         generation: generation.to_owned(),
-        observed_len: std::fs::metadata(path)?.len(),
+        observed_len,
     })
     .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
     std::fs::write(&temporary, bytes)?;
@@ -355,6 +354,7 @@ fn write_file_summary(
 }
 
 fn update_file_summary(path: &Path, appended: &str) -> io::Result<()> {
+    let observed_len = std::fs::metadata(path)?.len();
     let Some(mut summary) = read_file_summary(path)? else {
         return Ok(());
     };
@@ -384,7 +384,7 @@ fn update_file_summary(path: &Path, appended: &str) -> io::Result<()> {
         }
     }
     let generation = file_generation(path)?;
-    write_file_summary(path, &summary, &generation)
+    write_file_summary(path, &summary, &generation, observed_len)
 }
 
 fn scan_file_runs(workspace: &Path, workflow_id: Option<&str>, limit: usize) -> Vec<ScannedRun> {
@@ -415,24 +415,13 @@ fn scan_file_runs(workspace: &Path, workflow_id: Option<&str>, limit: usize) -> 
     runs
 }
 
-fn lock_path(workspace: &std::path::Path, run_id: &str) -> PathBuf {
-    let encoded = hex(&Sha256::digest(run_id.as_bytes()));
-    run_log::runs_dir(workspace).join(format!(".run-{encoded}.lock"))
-}
-
 fn file_store_path(
     workspace: &std::path::Path,
-    workflow_id: &str,
+    _workflow_id: &str,
     run_id: &str,
-    started: &str,
+    _started: &str,
 ) -> PathBuf {
-    let timestamp = run_log::sanitize(started);
-    run_log::runs_dir(workspace).join(format!(
-        "{}_{}_{}.log",
-        hex(workflow_id.as_bytes()),
-        timestamp,
-        hex(run_id.as_bytes())
-    ))
+    run_log::runs_dir(workspace).join(format!("run_{}.log", hex(run_id.as_bytes())))
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -444,7 +433,7 @@ fn hex(bytes: &[u8]) -> String {
     encoded
 }
 
-fn file_generation(path: &Path) -> io::Result<String> {
+pub(crate) fn file_generation(path: &Path) -> io::Result<String> {
     let mut file = std::fs::File::open(path)?;
     let mut header = vec![0; 16 * 1024];
     let read = file.read(&mut header)?;

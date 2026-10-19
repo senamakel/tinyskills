@@ -226,59 +226,7 @@ pub fn scan_runs(workspace: &Path, workflow_id: Option<&str>, limit: usize) -> V
 /// [`ScannedRun`] wire shape; storage-backed adapters may supply a stable URI.
 #[must_use]
 pub fn parse_run_log_text(text: &str, log_path: &str) -> Option<ScannedRun> {
-    let mut sid = String::new();
-    let mut rid = String::new();
-    let mut started = String::new();
-    let mut status = String::from("RUNNING");
-    let mut duration_ms: Option<u64> = None;
-    let mut finished: Option<String> = None;
-    let mut seen_result = false;
-    for line in text.lines() {
-        if line.starts_with("==== workflow_run:") {
-            sid = line
-                .trim_start_matches("==== workflow_run:")
-                .trim()
-                .trim_end_matches('=')
-                .trim()
-                .to_string();
-            continue;
-        }
-        if line.starts_with(RESULT_MARKER) {
-            seen_result = true;
-            continue;
-        }
-        let Some((label_raw, value_raw)) = line.split_once(':') else {
-            continue;
-        };
-        let label = label_raw.trim();
-        let value = value_raw.trim();
-        match (label, seen_result) {
-            ("run_id", false) => rid = value.to_string(),
-            ("started", false) => started = value.to_string(),
-            ("status", true) => status = value.to_string(),
-            ("duration", true) => {
-                if let Ok(n) = value.trim_end_matches(" ms").trim().parse::<u64>() {
-                    duration_ms = Some(n);
-                }
-            }
-            ("finished", true) => {
-                finished = Some(value.trim_end_matches(" UTC").trim().to_string());
-            }
-            _ => {}
-        }
-    }
-    if sid.is_empty() || rid.is_empty() {
-        return None;
-    }
-    Some(ScannedRun {
-        run_id: rid,
-        workflow_id: sid,
-        started,
-        status,
-        duration_ms,
-        finished,
-        log_path: log_path.to_owned(),
-    })
+    read_run_log_summary_from_text(text, log_path).map(|summary| summary.run)
 }
 
 /// Resolve a run id to its log path by matching the `_<first 8 chars>.log`
@@ -441,6 +389,12 @@ fn file_has_footer(path: &Path) -> std::io::Result<bool> {
     let summary_path = path.with_extension("summary.json");
     if let Ok(bytes) = std::fs::read(summary_path)
         && let Ok(summary) = serde_json::from_slice::<serde_json::Value>(&bytes)
+        && summary
+            .get("observed_len")
+            .and_then(serde_json::Value::as_u64)
+            == Some(std::fs::metadata(path)?.len())
+        && summary.get("generation").and_then(serde_json::Value::as_str)
+            == Some(crate::file_run_log_store::file_generation(path)?.as_str())
         && let Some(complete) = summary
             .get("summary")
             .and_then(|summary| summary.get("complete"))
