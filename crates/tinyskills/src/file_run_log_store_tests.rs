@@ -38,7 +38,10 @@ async fn partial_start_log_is_preserved_until_clear_then_can_be_recreated() {
     std::fs::write(&path, "run_generation: partial\n").unwrap();
 
     assert!(store.start(run.clone()).await.is_err());
-    assert_eq!(std::fs::read_to_string(&path).unwrap(), "run_generation: partial\n");
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "run_generation: partial\n"
+    );
     assert!(store.clear(run.run_id).await.unwrap());
     assert!(!path.exists());
     store.start(run).await.unwrap();
