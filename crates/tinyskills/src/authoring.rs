@@ -149,7 +149,7 @@ pub struct BundleSpec {
     pub allowed_tools: Vec<String>,
 }
 
-/// Options controlling [`scaffold_bundle`].
+/// Options controlling [`scaffold_bundle_in_scratch`].
 #[derive(Debug, Clone, Default)]
 pub struct ScaffoldOptions {
     /// Edit an existing bundle instead of creating a new one. The existing
@@ -163,7 +163,7 @@ pub struct ScaffoldOptions {
     pub document: BundleDocument,
 }
 
-/// Result of a successful [`scaffold_bundle`].
+/// Result of a successful [`scaffold_bundle_in_scratch`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScaffoldOutcome {
     /// Slug of the bundle.
@@ -423,7 +423,7 @@ pub fn render_workflow_md(spec: &BundleSpec) -> String {
 /// Returns an error for an unsafe slug, an invalid description, root or
 /// containment failures, create/edit precondition failures, an edit whose
 /// existing body cannot be parsed, or filesystem failures.
-pub fn scaffold_bundle(
+pub fn scaffold_bundle_in_scratch(
     root: &Path,
     spec: &BundleSpec,
     options: &ScaffoldOptions,

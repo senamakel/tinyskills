@@ -88,7 +88,7 @@ pub async fn scaffold_bundle_in_store<S: BundleStore + ?Sized>(
         legacy_roots: Vec::new(),
         document: options.document,
     };
-    crate::scaffold_bundle(scratch_root, spec, &stage_options)?;
+    crate::scaffold_bundle_in_scratch(scratch_root, spec, &stage_options)?;
     let content = read_staged_bundle(&stage, options.document)?;
     let revision = store.publish(&spec.slug, expected, &content).await?;
     Ok(PublishedBundle {
