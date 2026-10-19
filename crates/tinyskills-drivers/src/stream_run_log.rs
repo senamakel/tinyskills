@@ -254,9 +254,7 @@ impl RunLogStore for StreamRunLogStore {
                     .await
                 {
                     Ok(_) => return Ok(()),
-                    Err(error)
-                        if error.kind == tinystoragedrivers_core::StorageErrorKind::Conflict =>
-                    {
+                    Err(error) if error.kind() == tinystoragedrivers_core::ErrorKind::Conflict => {
                         continue;
                     }
                     Err(error) => return Err(storage_error(&error)),
