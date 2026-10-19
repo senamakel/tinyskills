@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use super::cursor::{StreamCursorState, decode_hex, encode_cursor};
+use super::records::StreamRecord;
 use super::*;
 use serde_json::Value;
 use tinystoragedrivers_core::{MemoryStorage, Scope, StorageBackend, StreamEntry, StreamStore};
@@ -290,6 +292,14 @@ async fn stream_cursors_reject_other_runs_scopes_and_recreated_runs() {
     ));
 
     assert!(first.clear("run-12345678").await.unwrap());
+    assert!(matches!(
+        first.tail("run-12345678", None, 16).await,
+        Err(RunLogError::Backend(_))
+    ));
+    assert!(matches!(
+        first.tail("run-12345678", Some(&stale), 16).await,
+        Err(RunLogError::InvalidCursor)
+    ));
     first
         .start(run(
             "workflow-a",
@@ -467,6 +477,37 @@ async fn stream_rejects_a_cursor_inside_a_utf8_scalar() {
         store.tail("run-utf8cursor", Some(&forged), 8).await,
         Err(RunLogError::InvalidCursor)
     ));
+}
+
+#[tokio::test]
+async fn stream_rejects_cursor_positions_outside_the_run() {
+    let store = store("tenant-a");
+    store
+        .start(run(
+            "workflow-a",
+            "run-cursor-bounds",
+            "2026-01-01T00:00:00Z",
+            "prompt",
+        ))
+        .await
+        .unwrap();
+    let initial = store.tail("run-cursor-bounds", None, 1).await.unwrap();
+    let state: StreamCursorState =
+        serde_json::from_slice(&decode_hex(initial.cursor.as_opaque()).unwrap()).unwrap();
+
+    for position in [0, u64::MAX] {
+        let forged = RunCursor::from_opaque(
+            encode_cursor(&StreamCursorState {
+                position,
+                ..state.clone()
+            })
+            .unwrap(),
+        );
+        assert!(matches!(
+            store.tail("run-cursor-bounds", Some(&forged), 8).await,
+            Err(RunLogError::InvalidCursor)
+        ));
+    }
 }
 
 #[tokio::test]
