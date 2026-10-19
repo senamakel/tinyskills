@@ -37,7 +37,7 @@ for skill in skills {
 - store-backed authoring: `scaffold_bundle_in_store` stages in a caller-owned temporary directory, reads the store as the edit source of truth, and publishes with an expected revision; legacy roots are read-only import sources
 - store-backed fetched and compiled installs: `install_document_in_store` and `install_compiled_in_store` publish validated bundle content without a local persistent-root fallback
 - revision-checked deletion: `remove_bundle_from_store`
-- local filesystem staging helpers: `scaffold_bundle`, `remove_bundle`, and `write_installed_document` operate on caller-selected directories; they do not provide cloud persistence
+- filesystem staging helper: `scaffold_bundle_in_scratch` only changes caller-provided scratch space; it does not provide persistent storage
 - `TriggerPattern` parsing and matching for `triggers:` frontmatter
 - `read_document` for size-bounded, symlink-free, UTF-8 reads of documents and sidecars
 - supply-chain scan of untrusted skill text: `scan_skill` over a `ScanDocument` and its bundled files returns `pass`/`warn`/`block` findings (invisible/bidi/zero-width code points, hard-coded credentials, and escaping resource paths block; agent-addressed text, fetch-and-exec pipelines, and undeclared MCP references warn), plus `sanitize_catalogue_text` for rendering untrusted text into a prompt as data

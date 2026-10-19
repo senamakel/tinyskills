@@ -272,9 +272,10 @@ fn edit_finds_bundles_under_legacy_roots() -> Result<(), Box<dyn std::error::Err
         ..ScaffoldOptions::default()
     };
     let outcome = scaffold_bundle_in_scratch(&temp.path().join("primary"), &spec("old-one"), &options)?;
-    assert_eq!(outcome.dir, fs::canonicalize(&dir)?);
+    assert_eq!(outcome.dir, fs::canonicalize(temp.path().join("primary/old-one"))?);
     assert!(outcome.document.ends_with("old-one/WORKFLOW.md"));
-    assert!(!temp.path().join("primary").join("old-one").exists());
+    assert!(dir.join("SKILL.md").is_file(), "legacy source remains untouched");
+    assert!(outcome.dir.join("WORKFLOW.md").is_file());
     Ok(())
 }
 
