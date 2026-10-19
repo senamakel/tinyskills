@@ -1,3 +1,5 @@
+//! Store-backed authoring, install, import, and removal behavior.
+
 use std::{
     collections::BTreeMap,
     sync::{
@@ -12,6 +14,22 @@ use tinyskills::{
     install_compiled_in_store, install_document_in_store, remove_bundle_from_store,
     scaffold_bundle_in_store,
 };
+
+trait TestResultExt<T> {
+    fn into_test_result(self) -> Result<T, Box<dyn std::error::Error>>;
+}
+
+impl<T, E: std::error::Error + 'static> TestResultExt<T> for Result<T, E> {
+    fn into_test_result(self) -> Result<T, Box<dyn std::error::Error>> {
+        self.map_err(Into::into)
+    }
+}
+
+impl<T> TestResultExt<T> for Option<T> {
+    fn into_test_result(self) -> Result<T, Box<dyn std::error::Error>> {
+        self.ok_or_else(|| "expected an item".into())
+    }
+}
 
 #[derive(Default)]
 struct MemoryStore {
@@ -154,20 +172,21 @@ async fn authoring_reads_store_content_preserves_resources_and_publishes_cas_rev
         Some(&b"reference"[..])
     );
     Ok(())
+    Ok(())
 }
 
 #[tokio::test]
-async fn fetched_install_and_remove_use_store_revisions() {
+async fn fetched_install_and_remove_use_store_revisions() -> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryStore::default();
     let fetched = b"---\nname: New Skill\ndescription: useful\n---\nbody\n";
-    let installed = install_document_in_store(&store, fetched).await.unwrap();
+    let installed = install_document_in_store(&store, fetched).await.into_test_result()?;
     assert_eq!(installed.id, "new-skill");
     assert_eq!(
         store
             .read("new-skill")
             .await
-            .unwrap()
-            .unwrap()
+            .into_test_result()?
+            .into_test_result()?
             .content
             .file("SKILL.md"),
         Some(&fetched[..])
@@ -175,14 +194,14 @@ async fn fetched_install_and_remove_use_store_revisions() {
     assert_eq!(
         install_document_in_store(&store, fetched)
             .await
-            .unwrap()
+            .into_test_result()?
             .revision,
         installed.revision
     );
     assert_eq!(
         remove_bundle_from_store(&store, "new-skill", installed.revision)
             .await
-            .unwrap(),
+            .into_test_result()?,
         BundleRevision(2)
     );
     assert!(matches!(
@@ -191,21 +210,22 @@ async fn fetched_install_and_remove_use_store_revisions() {
             BundleStoreError::Conflict { current: None }
         ))
     ));
-    assert!(store.read("new-skill").await.unwrap().is_none());
+    assert!(store.read("new-skill").await.into_test_result()?.is_none());
+    Ok(())
 }
 
 #[tokio::test]
-async fn legacy_import_is_read_only_and_store_content_wins_on_edit() {
+async fn legacy_import_is_read_only_and_store_content_wins_on_edit() -> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryStore::default();
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempfile::tempdir().into_test_result()?;
     let legacy = temp.path().join("legacy");
-    std::fs::create_dir_all(legacy.join("demo/references")).unwrap();
+    std::fs::create_dir_all(legacy.join("demo/references")).into_test_result()?;
     std::fs::write(
         legacy.join("demo/WORKFLOW.md"),
         "---\nname: demo\ndescription: old\n---\nlegacy body\n",
     )
-    .unwrap();
-    std::fs::write(legacy.join("demo/references/old.md"), "old resource").unwrap();
+    .into_test_result()?;
+    std::fs::write(legacy.join("demo/references/old.md"), "old resource").into_test_result()?;
     let spec = BundleSpec {
         slug: "demo".into(),
         description: "new".into(),
@@ -224,18 +244,18 @@ async fn legacy_import_is_read_only_and_store_content_wins_on_edit() {
         None,
     )
     .await
-    .unwrap();
+    .into_test_result()?;
     assert!(
         std::fs::read_to_string(legacy.join("demo/WORKFLOW.md"))
-            .unwrap()
+            .into_test_result()?
             .contains("description: old")
     );
     assert_eq!(
         store
             .read("demo")
             .await
-            .unwrap()
-            .unwrap()
+            .into_test_result()?
+            .into_test_result()?
             .content
             .file("references/old.md"),
         Some(&b"old resource"[..])
@@ -248,7 +268,7 @@ async fn legacy_import_is_read_only_and_store_content_wins_on_edit() {
     store
         .publish("demo", Some(first.revision), &newer)
         .await
-        .unwrap();
+        .into_test_result()?;
     let second = scaffold_bundle_in_store(
         &store,
         &temp.path().join("stage-two"),
@@ -265,10 +285,11 @@ async fn legacy_import_is_read_only_and_store_content_wins_on_edit() {
             }
         ))
     ));
+    Ok(())
 }
 
 #[tokio::test]
-async fn compiled_install_publishes_files_and_does_not_replace_user_heads() {
+async fn compiled_install_publishes_files_and_does_not_replace_user_heads() -> Result<(), Box<dyn std::error::Error>> {
     static FILES: &[BundledFile] = &[
         BundledFile {
             path: "SKILL.md",
@@ -285,14 +306,14 @@ async fn compiled_install_publishes_files_and_does_not_replace_user_heads() {
         files: FILES,
     }];
     let first = install_compiled_in_store(&store, &compiled).await;
-    let installed = first.into_iter().next().unwrap().unwrap();
-    let persisted = store.read("builtin").await.unwrap().unwrap();
+    let installed = first.into_iter().next().into_test_result()?.into_test_result()?;
+    let persisted = store.read("builtin").await.into_test_result()?.into_test_result()?;
     assert_eq!(
         persisted.content.file("references/info.md"),
         Some(&b"resource"[..])
     );
     let second = install_compiled_in_store(&store, &compiled).await;
-    assert_eq!(second.into_iter().next().unwrap().unwrap(), installed);
+    assert_eq!(second.into_iter().next().into_test_result()?.into_test_result()?, installed);
     let newer = content(
         BundleDocument::Skill,
         "---\nname: builtin\ndescription: changed\n---\nuser version\n",
@@ -301,10 +322,10 @@ async fn compiled_install_publishes_files_and_does_not_replace_user_heads() {
     store
         .publish("builtin", Some(installed.revision), &newer)
         .await
-        .unwrap();
+        .into_test_result()?;
     let third = install_compiled_in_store(&store, &compiled).await;
     assert!(matches!(
-        third.into_iter().next().unwrap(),
+        third.into_iter().next().into_test_result()?,
         Err(tinyskills::BundleOperationError::Store(
             BundleStoreError::Conflict {
                 current: Some(BundleRevision(2))
@@ -312,16 +333,17 @@ async fn compiled_install_publishes_files_and_does_not_replace_user_heads() {
         ))
     ));
     assert_eq!(
-        store.read("builtin").await.unwrap().unwrap().revision,
+        store.read("builtin").await.into_test_result()?.into_test_result()?.revision,
         BundleRevision(2)
     );
+    Ok(())
 }
 
 #[tokio::test]
-async fn store_refusal_stops_authoring_before_staging_anything() {
+async fn store_refusal_stops_authoring_before_staging_anything() -> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryStore::default();
     store.fail_reads.store(true, Ordering::SeqCst);
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempfile::tempdir().into_test_result()?;
     let spec = BundleSpec {
         slug: "demo".into(),
         description: "new".into(),
@@ -334,18 +356,19 @@ async fn store_refusal_stops_authoring_before_staging_anything() {
         Err(tinyskills::BundleOperationError::Store(_))
     ));
     assert!(!temp.path().join("demo").exists());
+    Ok(())
 }
 
 #[tokio::test]
-async fn authoring_rejects_traversal_before_writing_beyond_scratch() {
+async fn authoring_rejects_traversal_before_writing_beyond_scratch() -> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryStore::default();
     let existing = content(
         BundleDocument::Workflow,
         "---\nname: escape\ndescription: stored\n---\nstored body\n",
         vec![],
     );
-    store.publish("../escape", None, &existing).await.unwrap();
-    let temp = tempfile::tempdir().unwrap();
+    store.publish("../escape", None, &existing).await.into_test_result()?;
+    let temp = tempfile::tempdir().into_test_result()?;
     let scratch = temp.path().join("scratch");
     let spec = BundleSpec {
         slug: "../escape".into(),
@@ -370,24 +393,25 @@ async fn authoring_rejects_traversal_before_writing_beyond_scratch() {
         ))
     ));
     assert!(!temp.path().join("escape/WORKFLOW.md").exists());
+    Ok(())
 }
 
 #[tokio::test]
-async fn legacy_import_rejects_oversized_files_before_copying_them() {
+async fn legacy_import_rejects_oversized_files_before_copying_them() -> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryStore::default();
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempfile::tempdir().into_test_result()?;
     let legacy = temp.path().join("legacy");
     let bundle_dir = legacy.join("demo");
-    std::fs::create_dir_all(bundle_dir.join("scripts")).unwrap();
+    std::fs::create_dir_all(bundle_dir.join("scripts")).into_test_result()?;
     std::fs::write(
         bundle_dir.join("WORKFLOW.md"),
         "---\nname: demo\ndescription: demo\n---\nbody\n",
     )
-    .unwrap();
+    .into_test_result()?;
     std::fs::File::create(bundle_dir.join("scripts/oversized.bin"))
-        .unwrap()
+        .into_test_result()?
         .set_len((BundleLimits::default().max_file_bytes + 1) as u64)
-        .unwrap();
+        .into_test_result()?;
     let spec = BundleSpec {
         slug: "demo".into(),
         description: "updated".into(),
@@ -418,24 +442,25 @@ async fn legacy_import_rejects_oversized_files_before_copying_them() {
             .exists(),
         "the oversized legacy file must not be copied to scratch"
     );
-    assert!(store.read("demo").await.unwrap().is_none());
+    assert!(store.read("demo").await.into_test_result()?.is_none());
+    Ok(())
 }
 
 #[tokio::test]
-async fn legacy_import_rejects_too_deep_trees_before_copying_them() {
+async fn legacy_import_rejects_too_deep_trees_before_copying_them() -> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryStore::default();
-    let temp = tempfile::tempdir().unwrap();
+    let temp = tempfile::tempdir().into_test_result()?;
     let legacy = temp.path().join("legacy");
     let bundle_dir = legacy.join("demo");
-    std::fs::create_dir_all(&bundle_dir).unwrap();
+    std::fs::create_dir_all(&bundle_dir).into_test_result()?;
     std::fs::write(
         bundle_dir.join("WORKFLOW.md"),
         "---\nname: demo\ndescription: demo\n---\nbody\n",
     )
-    .unwrap();
+    .into_test_result()?;
     let deep = (0..65).fold(bundle_dir, |path, _| path.join("d"));
-    std::fs::create_dir_all(&deep).unwrap();
-    std::fs::write(deep.join("leaf.txt"), "leaf").unwrap();
+    std::fs::create_dir_all(&deep).into_test_result()?;
+    std::fs::write(deep.join("leaf.txt"), "leaf").into_test_result()?;
     let spec = BundleSpec {
         slug: "demo".into(),
         description: "updated".into(),
@@ -463,11 +488,12 @@ async fn legacy_import_rejects_too_deep_trees_before_copying_them() {
         !temp.path().join("scratch/demo").exists(),
         "the deep legacy tree must be rejected before any scratch copy"
     );
-    assert!(store.read("demo").await.unwrap().is_none());
+    assert!(store.read("demo").await.into_test_result()?.is_none());
+    Ok(())
 }
 
 #[tokio::test]
-async fn stored_bundle_over_the_requested_budget_is_rejected_before_staging() {
+async fn stored_bundle_over_the_requested_budget_is_rejected_before_staging() -> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryStore::default();
     let default_limits = BundleLimits::default();
     let oversized = UserBundle::new(
@@ -484,9 +510,9 @@ async fn stored_bundle_over_the_requested_budget_is_rejected_before_staging() {
             max_path_bytes: default_limits.max_path_bytes,
         },
     )
-    .unwrap();
-    store.publish("demo", None, &oversized).await.unwrap();
-    let temp = tempfile::tempdir().unwrap();
+    .into_test_result()?;
+    store.publish("demo", None, &oversized).await.into_test_result()?;
+    let temp = tempfile::tempdir().into_test_result()?;
     let spec = BundleSpec {
         slug: "demo".into(),
         description: "updated".into(),
@@ -511,9 +537,10 @@ async fn stored_bundle_over_the_requested_budget_is_rejected_before_staging() {
     ));
     assert!(!temp.path().join("demo").exists());
     assert_eq!(
-        store.read("demo").await.unwrap().unwrap().revision,
+        store.read("demo").await.into_test_result()?.into_test_result()?.revision,
         BundleRevision(1)
     );
+    Ok(())
 }
 //! Store-backed authoring, install, import, and removal behavior.
 
