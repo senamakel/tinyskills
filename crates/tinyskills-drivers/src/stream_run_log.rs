@@ -414,6 +414,11 @@ impl RunLogStore for StreamRunLogStore {
                             "run stream record is malformed".into(),
                         ));
                     }
+                    StreamRecord::Tombstone { .. } => {
+                        return Err(RunLogError::Backend(
+                            "run stream record is malformed".into(),
+                        ));
+                    }
                 }
             }
             let eof = offset > checkpoint_offset && within == 0;
