@@ -264,3 +264,66 @@ async fn legacy_import_rejects_a_symlinked_root_before_staging()
     assert!(!temp.path().join("demo").exists());
     Ok(())
 }
+
+#[tokio::test]
+async fn edit_without_a_matching_legacy_bundle_creates_a_new_store_head()
+-> Result<(), Box<dyn std::error::Error>> {
+    let store = MemoryStore::default();
+    let temp = tempfile::tempdir()?;
+    let legacy = temp.path().join("legacy");
+    std::fs::create_dir(&legacy)?;
+    let spec = BundleSpec {
+        slug: "demo".into(),
+        description: "new".into(),
+        ..BundleSpec::default()
+    };
+    let outcome = scaffold_bundle_in_store(
+        &store,
+        temp.path(),
+        &spec,
+        &tinyskills::ScaffoldOptions {
+            overwrite: true,
+            legacy_roots: vec![legacy],
+            ..Default::default()
+        },
+        None,
+    )
+    .await?;
+    assert_eq!(outcome.revision, BundleRevision(1));
+    assert!(store.read("demo").await?.is_some());
+    Ok(())
+}
+
+#[tokio::test]
+async fn legacy_import_rejects_an_invalid_primary_document_before_staging()
+-> Result<(), Box<dyn std::error::Error>> {
+    let store = MemoryStore::default();
+    let temp = tempfile::tempdir()?;
+    let legacy = temp.path().join("legacy/demo");
+    std::fs::create_dir_all(&legacy)?;
+    std::fs::write(legacy.join("SKILL.md"), [0xff, 0xfe])?;
+    let spec = BundleSpec {
+        slug: "demo".into(),
+        description: "edit".into(),
+        ..BundleSpec::default()
+    };
+    let result = scaffold_bundle_in_store(
+        &store,
+        temp.path(),
+        &spec,
+        &tinyskills::ScaffoldOptions {
+            overwrite: true,
+            legacy_roots: vec![temp.path().join("legacy")],
+            ..Default::default()
+        },
+        None,
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(tinyskills::BundleOperationError::Io(_))
+    ));
+    assert!(!temp.path().join("demo").exists());
+    assert!(store.read("demo").await?.is_none());
+    Ok(())
+}
