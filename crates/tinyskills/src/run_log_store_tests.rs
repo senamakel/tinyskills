@@ -28,7 +28,7 @@ async fn file_store_starts_appends_lists_tails_and_clears_runs() {
     let first = FileRunLogStore::new(temp.path());
     let second_handle = FileRunLogStore::new(temp.path());
 
-    assert!(first.list(None, 10).await.unwrap().is_empty());
+    assert_eq!(first.list(None, 10).await.unwrap().len(), 0);
     first
         .start(start(
             "workflow-a",
