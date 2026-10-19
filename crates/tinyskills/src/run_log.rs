@@ -393,7 +393,9 @@ fn file_has_footer(path: &Path) -> std::io::Result<bool> {
             .get("observed_len")
             .and_then(serde_json::Value::as_u64)
             == Some(std::fs::metadata(path)?.len())
-        && summary.get("generation").and_then(serde_json::Value::as_str)
+        && summary
+            .get("generation")
+            .and_then(serde_json::Value::as_str)
             == Some(crate::file_run_log_store::file_generation(path)?.as_str())
         && let Some(complete) = summary
             .get("summary")

@@ -34,7 +34,10 @@ impl FileRunLogStore {
             .workspace
             .canonicalize()
             .unwrap_or_else(|_| self.workspace.clone());
-        format!("file:{}", hex(&Sha256::digest(identity.as_os_str().as_encoded_bytes())))
+        format!(
+            "file:{}",
+            hex(&Sha256::digest(identity.as_os_str().as_encoded_bytes()))
+        )
     }
 
     fn validate_id(value: &str) -> Result<(), RunLogError> {
@@ -115,20 +118,23 @@ impl RunLogStore for FileRunLogStore {
                         "run already exists",
                     ));
                 }
-                let mut file = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&path_for_task)?;
-                file.write_all(header.as_bytes())?;
-                file.write_all(b"\n")?;
-                file.flush()?;
+                let write_result = (|| {
+                    let mut file = std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(&path_for_task)?;
+                    file.write_all(header.as_bytes())?;
+                    file.write_all(b"\n")?;
+                    file.flush()
+                })();
+                if let Err(error) = write_result {
+                    let _ = std::fs::remove_file(&path_for_task);
+                    return Err(error);
+                }
                 let observed_len = header.len() as u64 + 1;
-                if let Err(error) = write_file_summary(
-                    &path_for_task,
-                    &summary,
-                    &summary_generation,
-                    observed_len,
-                ) {
+                if let Err(error) =
+                    write_file_summary(&path_for_task, &summary, &summary_generation, observed_len)
+                {
                     let _ = std::fs::remove_file(summary_path(&path_for_task));
                     let _ = std::fs::remove_file(generation_path(&path_for_task));
                     let _ = std::fs::remove_file(&path_for_task);
@@ -259,7 +265,9 @@ impl RunLogStore for FileRunLogStore {
                     let deterministic = file_store_path(&workspace, "", &run_id, "");
                     deterministic.exists().then_some(deterministic)
                 });
-                let Some(path) = path else { return Ok::<bool, io::Error>(false) };
+                let Some(path) = path else {
+                    return Ok::<bool, io::Error>(false);
+                };
                 std::fs::remove_file(&path)?;
                 let _ = std::fs::remove_file(summary_path(&path));
                 let _ = std::fs::remove_file(generation_path(&path));

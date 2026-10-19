@@ -48,6 +48,23 @@ async fn partial_start_log_is_preserved_until_clear_then_can_be_recreated() {
 }
 
 #[tokio::test]
+async fn concurrent_same_id_starts_have_one_winner() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let first = FileRunLogStore::new(temp.path());
+    let second = FileRunLogStore::new(temp.path());
+    let first_run = start();
+    let second_run = RunLogStart {
+        started: "2026-01-01T00:00:01Z",
+        ..first_run.clone()
+    };
+
+    let (first_result, second_result) =
+        tokio::join!(first.start(first_run), second.start(second_run));
+    assert_ne!(first_result.is_ok(), second_result.is_ok());
+    assert_eq!(first.list(None, 10).await.unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn summary_write_keeps_the_length_that_was_parsed() {
     let temp = tempfile::TempDir::new().unwrap();
     let store = FileRunLogStore::new(temp.path());
