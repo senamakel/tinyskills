@@ -61,3 +61,27 @@ fn record_values_roundtrip_versioned_headers() {
         StreamRecord::Header { schema: 1, .. }
     ));
 }
+
+#[test]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+fn empty_chunks_and_footer_without_status_remain_incomplete() {
+    assert!(text_records("").unwrap().is_empty());
+    let mut summary = run_log::read_run_log_summary_from_text(
+        &run_log::format_header(
+            "workflow",
+            "run-incomplete-footer",
+            "2026-01-01T00:00:00Z",
+            &serde_json::json!({}),
+            "prompt",
+        ),
+        "stream://test",
+    )
+    .unwrap();
+    update_summary(
+        &mut summary,
+        "--- result ---\nunknown: ignored\nfinished: 2026-01-01 UTC\n",
+    );
+    assert_eq!(summary.run.duration_ms, None);
+    assert_eq!(summary.run.finished.as_deref(), Some("2026-01-01"));
+    assert!(!summary.complete);
+}

@@ -84,3 +84,52 @@ async fn starting_an_existing_stream_never_replaces_its_run() {
             .contains("original prompt")
     );
 }
+
+#[test]
+fn stream_identifier_and_timestamp_validation_keep_unicode_ids_safe() {
+    assert!(validate_id("workflow/雪").is_ok());
+    let long_id = "x".repeat(513);
+    for invalid in ["", " padded", "padded ", "control\nchar", long_id.as_str()] {
+        assert!(matches!(
+            validate_id(invalid),
+            Err(RunLogError::InvalidId(_))
+        ));
+    }
+    assert!(validate_started("2026-01-01T00:00:00Z").is_ok());
+    let long_timestamp = "x".repeat(65);
+    for invalid in ["", "2026-01-01T00:00:00Z!", long_timestamp.as_str()] {
+        assert!(matches!(
+            validate_started(invalid),
+            Err(RunLogError::InvalidId(_))
+        ));
+    }
+    assert_ne!(new_generation(), new_generation());
+}
+
+#[tokio::test]
+async fn malformed_stream_records_fail_closed_in_every_read_operation() {
+    let store = store("tenant-a");
+    let stream = StreamRunLogStore::stream_name("run-corrupt-record").unwrap();
+    store
+        .streams
+        .append(&stream, serde_json::json!({"kind": "unknown"}))
+        .await
+        .unwrap();
+
+    assert!(matches!(
+        store.tail("run-corrupt-record", None, 16).await,
+        Err(RunLogError::Backend(_))
+    ));
+    assert!(matches!(
+        store.append("run-corrupt-record", "text").await,
+        Err(RunLogError::Backend(_))
+    ));
+    assert!(matches!(
+        store.list(None, 10).await,
+        Err(RunLogError::Backend(_))
+    ));
+    assert!(matches!(
+        store.clear("run-corrupt-record").await,
+        Err(RunLogError::Backend(_))
+    ));
+}

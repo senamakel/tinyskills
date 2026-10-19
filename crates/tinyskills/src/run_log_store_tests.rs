@@ -327,6 +327,34 @@ fn opaque_file_cursors_validate_encoding_owner_and_generation() {
     ));
 }
 
+#[test]
+fn debug_views_redact_run_inputs_prompts_and_log_content() {
+    let inputs = serde_json::json!({"private_field": "private-value"});
+    let start = RunLogStart {
+        workflow_id: "workflow-a",
+        run_id: "run-a",
+        started: "2026-01-01T00:00:00Z",
+        inputs: &inputs,
+        task_prompt: "private-prompt",
+    };
+    let start_debug = format!("{start:?}");
+    assert!(start_debug.contains("workflow-a"));
+    assert!(start_debug.contains("[redacted]"));
+    assert!(!start_debug.contains("private-value"));
+    assert!(!start_debug.contains("private-prompt"));
+
+    let page = RunLogPage {
+        content: "private-log-content".to_owned(),
+        cursor: RunCursor::from_opaque("opaque-token"),
+        eof: false,
+        complete: false,
+    };
+    let page_debug = format!("{page:?}");
+    assert!(page_debug.contains("opaque-token"));
+    assert!(page_debug.contains("[redacted]"));
+    assert!(!page_debug.contains("private-log-content"));
+}
+
 #[tokio::test]
 async fn file_store_rejects_a_cursor_inside_a_utf8_scalar() {
     let temp = tempfile::TempDir::new().unwrap();
