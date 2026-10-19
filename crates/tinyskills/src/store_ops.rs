@@ -373,7 +373,10 @@ fn read_bundle_dir(
 ) -> Result<UserBundle, BundleOperationError> {
     let paths = walk_bundle_files(root, limits)?;
     let preferred = primary.file_name();
-    let fallback = primary.other();
+    let fallback = match primary {
+        BundleDocument::Workflow => crate::SKILL_MD,
+        BundleDocument::Skill => crate::WORKFLOW_MD,
+    };
     let document_path = paths
         .iter()
         .find(|(_, name, _)| name == preferred)
