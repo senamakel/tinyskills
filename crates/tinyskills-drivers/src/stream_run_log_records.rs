@@ -82,7 +82,12 @@ pub(super) fn update_summary(summary: &mut run_log::RunLogSummary, text: &str) {
             }
             "finished" => {
                 summary.run.finished = Some(value.trim_end_matches(" UTC").trim().to_owned());
-                summary.complete = !summary.run.status.is_empty();
+                // `RUNNING` is the display default supplied by the shared
+                // summary parser, not a status read from the footer. A
+                // finished timestamp alone must not make an incomplete
+                // footer look complete.
+                summary.complete =
+                    !summary.run.status.is_empty() && summary.run.status != "RUNNING";
             }
             _ => {}
         }
