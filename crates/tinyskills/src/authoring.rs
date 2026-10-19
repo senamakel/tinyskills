@@ -434,7 +434,7 @@ pub fn scaffold_bundle_in_scratch(
     let canonical_root = std::fs::canonicalize(root)
         .map_err(|error| io_error("failed to canonicalize skills root", root, error))?;
 
-    let mut dir = canonical_root.join(&spec.slug);
+    let dir = canonical_root.join(&spec.slug);
     if !dir.starts_with(&canonical_root) {
         return Err(AuthoringError::Escapes {
             dir: dir.display().to_string(),
