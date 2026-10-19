@@ -377,7 +377,8 @@ fn update_file_summary(path: &Path, appended: &str) -> io::Result<()> {
             }
             "finished" => {
                 summary.run.finished = Some(value.trim_end_matches(" UTC").trim().to_string());
-                summary.complete = !summary.run.status.is_empty();
+                summary.complete =
+                    !summary.run.status.is_empty() && summary.run.status != "RUNNING";
             }
             _ => {}
         }
