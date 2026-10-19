@@ -53,8 +53,6 @@ pub async fn scaffold_bundle_in_store<S: BundleStore + ?Sized>(
     options: &ScaffoldOptions,
     expected: Option<BundleRevision>,
 ) -> Result<PublishedBundle, BundleOperationError> {
-    crate::authoring::validate_slug(&spec.slug)?;
-    crate::validate_description(&spec.description)?;
     let current = store.read(&spec.slug).await?;
     if current.as_ref().map(|stored| stored.revision) != expected {
         return Err(BundleOperationError::Store(BundleStoreError::Conflict {

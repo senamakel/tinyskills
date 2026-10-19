@@ -335,3 +335,42 @@ async fn store_refusal_stops_authoring_before_staging_anything() {
     ));
     assert!(!temp.path().join("demo").exists());
 }
+
+#[tokio::test]
+async fn authoring_rejects_traversal_before_writing_beyond_scratch() {
+    let store = MemoryStore::default();
+    let existing = content(
+        BundleDocument::Workflow,
+        "---\nname: escape\ndescription: stored\n---\nstored body\n",
+        vec![],
+    );
+    store
+        .publish("../escape", None, &existing)
+        .await
+        .unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let scratch = temp.path().join("scratch");
+    let spec = BundleSpec {
+        slug: "../escape".into(),
+        description: "changed".into(),
+        ..BundleSpec::default()
+    };
+    let result = scaffold_bundle_in_store(
+        &store,
+        &scratch,
+        &spec,
+        &tinyskills::ScaffoldOptions {
+            overwrite: true,
+            ..Default::default()
+        },
+        Some(BundleRevision(1)),
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(tinyskills::BundleOperationError::Authoring(
+            tinyskills::AuthoringError::InvalidSlug { .. }
+        ))
+    ));
+    assert!(!temp.path().join("escape/WORKFLOW.md").exists());
+}
