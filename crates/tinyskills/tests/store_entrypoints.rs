@@ -535,6 +535,55 @@ async fn legacy_import_rejects_too_deep_trees_before_copying_them()
 }
 
 #[tokio::test]
+async fn legacy_import_rejects_too_many_empty_entries_before_staging()
+-> Result<(), Box<dyn std::error::Error>> {
+    let store = MemoryStore::default();
+    let temp = tempfile::tempdir().into_test_result()?;
+    let legacy = temp.path().join("legacy/demo");
+    std::fs::create_dir_all(&legacy).into_test_result()?;
+    std::fs::write(
+        legacy.join("SKILL.md"),
+        "---\nname: demo\ndescription: demo\n---\nbody\n",
+    )
+    .into_test_result()?;
+    for index in 0..7 {
+        std::fs::create_dir(legacy.join(format!("empty-{index}"))).into_test_result()?;
+    }
+    let limits = BundleLimits {
+        max_files: 2,
+        max_depth: 3,
+        ..BundleLimits::default()
+    };
+    let spec = BundleSpec {
+        slug: "demo".into(),
+        description: "updated".into(),
+        ..Default::default()
+    };
+    let result = scaffold_bundle_in_store(
+        &store,
+        &temp.path().join("scratch"),
+        &spec,
+        &tinyskills::ScaffoldOptions {
+            overwrite: true,
+            legacy_roots: vec![temp.path().join("legacy")],
+            limits,
+            ..Default::default()
+        },
+        None,
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(tinyskills::BundleOperationError::Content(
+            tinyskills::BundleContentError::Limit("entry count")
+        ))
+    ));
+    assert!(!temp.path().join("scratch/demo").exists());
+    assert!(store.read("demo").await.into_test_result()?.is_none());
+    Ok(())
+}
+
+#[tokio::test]
 async fn stored_bundle_over_the_requested_budget_is_rejected_before_staging()
 -> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryStore::default();
