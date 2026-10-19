@@ -150,7 +150,7 @@ impl RunLogStore for FileRunLogStore {
             tokio::task::spawn_blocking(move || {
                 let path = exact_file_path(&workspace, &run_id)
                     .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "run log not found"))?;
-                let mut file = std::fs::OpenOptions::new().append(true).open(path)?;
+                let mut file = std::fs::OpenOptions::new().append(true).open(&path)?;
                 file.write_all(line.as_bytes())?;
                 if !line.ends_with('\n') {
                     file.write_all(b"\n")?;

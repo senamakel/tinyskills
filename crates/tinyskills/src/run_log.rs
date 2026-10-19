@@ -15,7 +15,7 @@
 #![allow(clippy::missing_errors_doc, clippy::cast_possible_truncation)]
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
+use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
