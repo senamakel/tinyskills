@@ -301,7 +301,7 @@ fn find_legacy_bundle(
         match fs::symlink_metadata(root) {
             Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
             Ok(_) => return Err(std::io::Error::other("legacy root is not a real directory")),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
             Err(error) => return Err(error),
         }
         let canonical_root = fs::canonicalize(root)?;
@@ -315,9 +315,7 @@ fn find_legacy_bundle(
                     "legacy bundle is not a real directory",
                 ));
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                continue;
-            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => return Err(error),
         }
     }
