@@ -454,3 +454,53 @@ async fn legacy_import_rejects_too_deep_trees_before_copying_them() {
     ));
     assert!(store.read("demo").await.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn stored_bundle_over_the_requested_budget_is_rejected_before_staging() {
+    let store = MemoryStore::default();
+    let default_limits = BundleLimits::default();
+    let oversized = UserBundle::new(
+        BundleDocument::Workflow,
+        "---\nname: demo\ndescription: stored\n---\nbody\n".into(),
+        vec![tinyskills::BundleFile {
+            path: "references/large.bin".into(),
+            bytes: vec![b'x'; default_limits.max_file_bytes + 1],
+        }],
+        BundleLimits {
+            max_files: 2,
+            max_file_bytes: default_limits.max_file_bytes + 1,
+            max_total_bytes: default_limits.max_total_bytes,
+            max_path_bytes: default_limits.max_path_bytes,
+        },
+    )
+    .unwrap();
+    store.publish("demo", None, &oversized).await.unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let spec = BundleSpec {
+        slug: "demo".into(),
+        description: "updated".into(),
+        ..Default::default()
+    };
+    let result = scaffold_bundle_in_store(
+        &store,
+        temp.path(),
+        &spec,
+        &tinyskills::ScaffoldOptions {
+            overwrite: true,
+            ..Default::default()
+        },
+        Some(BundleRevision(1)),
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(tinyskills::BundleOperationError::Content(
+            tinyskills::BundleContentError::Limit("file bytes")
+        ))
+    ));
+    assert!(!temp.path().join("demo").exists());
+    assert_eq!(
+        store.read("demo").await.unwrap().unwrap().revision,
+        BundleRevision(1)
+    );
+}
