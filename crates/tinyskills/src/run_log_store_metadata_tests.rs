@@ -122,12 +122,7 @@ async fn file_store_does_not_leave_a_reservation_after_summary_failure() {
         "2026-01-01T00:00:00Z",
         "prompt",
     );
-    let log_path = file_store_path(
-        temp.path(),
-        run.workflow_id,
-        run.run_id,
-        run.started,
-    );
+    let log_path = file_store_path(temp.path(), run.workflow_id, run.run_id, run.started);
     std::fs::create_dir_all(log_path.parent().unwrap()).unwrap();
     std::fs::create_dir(summary_path(&log_path)).unwrap();
 
@@ -141,12 +136,8 @@ async fn file_store_does_not_leave_a_reservation_after_summary_failure() {
 async fn encoded_suffix_collision_does_not_alias_a_legacy_run() {
     let temp = tempfile::TempDir::new().unwrap();
     let legacy_id = "61626364-legacy-run";
-    let legacy_path = crate::run_log::run_log_path(
-        temp.path(),
-        "workflow-a",
-        legacy_id,
-        "20260101T000000Z",
-    );
+    let legacy_path =
+        crate::run_log::run_log_path(temp.path(), "workflow-a", legacy_id, "20260101T000000Z");
     crate::run_log::write_header(
         &legacy_path,
         "workflow-a",
