@@ -289,6 +289,42 @@ fn edit_finds_bundles_under_legacy_roots() -> Result<(), Box<dyn std::error::Err
 
 #[cfg(unix)]
 #[test]
+fn edit_refuses_symlinks_in_read_only_legacy_sources() -> Result<(), Box<dyn std::error::Error>> {
+    let temp = tempfile::tempdir()?;
+    let legacy = temp.path().join("legacy");
+    let dir = legacy.join("old-one");
+    let outside = tempfile::tempdir()?;
+    fs::create_dir_all(&dir)?;
+    fs::write(
+        dir.join("SKILL.md"),
+        "---\nname: old-one\ndescription: d\n---\nbody\n",
+    )?;
+    fs::write(outside.path().join("secret.md"), "outside")?;
+    std::os::unix::fs::symlink(outside.path().join("secret.md"), dir.join("references.md"))?;
+    let options = ScaffoldOptions {
+        overwrite: true,
+        legacy_roots: vec![legacy],
+        ..ScaffoldOptions::default()
+    };
+    let result =
+        scaffold_bundle_in_scratch(&temp.path().join("primary"), &spec("old-one"), &options);
+    assert!(matches!(result, Err(AuthoringError::SymlinkedDir { .. })));
+    assert!(
+        !temp
+            .path()
+            .join("primary/old-one")
+            .join("references.md")
+            .exists()
+    );
+    assert_eq!(
+        fs::read_to_string(outside.path().join("secret.md"))?,
+        "outside"
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
 fn scaffold_refuses_a_symlinked_bundle_dir() -> Result<(), Box<dyn std::error::Error>> {
     let temp = tempfile::tempdir()?;
     let outside = tempfile::tempdir()?;

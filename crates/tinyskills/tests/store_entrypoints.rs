@@ -396,6 +396,105 @@ async fn store_refusal_stops_authoring_before_staging_anything()
 }
 
 #[tokio::test]
+async fn stale_authoring_revision_conflicts_before_creating_staging_content()
+-> Result<(), Box<dyn std::error::Error>> {
+    let store = MemoryStore::default();
+    let current = content(
+        BundleDocument::Workflow,
+        "---\nname: demo\ndescription: current\n---\ncurrent body\n",
+        vec![],
+    )?;
+    store.publish("demo", None, &current).await?;
+    let scratch = tempfile::tempdir()?;
+    let spec = BundleSpec {
+        slug: "demo".into(),
+        description: "stale edit".into(),
+        ..BundleSpec::default()
+    };
+    let result = scaffold_bundle_in_store(
+        &store,
+        scratch.path(),
+        &spec,
+        &tinyskills::ScaffoldOptions {
+            overwrite: true,
+            ..Default::default()
+        },
+        Some(BundleRevision(0)),
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(tinyskills::BundleOperationError::Store(
+            BundleStoreError::Conflict {
+                current: Some(BundleRevision(1))
+            }
+        ))
+    ));
+    assert!(!scratch.path().join("demo").exists());
+    Ok(())
+}
+
+#[tokio::test]
+async fn authoring_refuses_existing_caller_staging_path() -> Result<(), Box<dyn std::error::Error>>
+{
+    let store = MemoryStore::default();
+    let scratch = tempfile::tempdir()?;
+    let stage = scratch.path().join("demo");
+    std::fs::create_dir(&stage)?;
+    let spec = BundleSpec {
+        slug: "demo".into(),
+        description: "new".into(),
+        ..BundleSpec::default()
+    };
+    let result = scaffold_bundle_in_store(
+        &store,
+        scratch.path(),
+        &spec,
+        &tinyskills::ScaffoldOptions::default(),
+        None,
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(tinyskills::BundleOperationError::Io(error))
+            if error.kind() == std::io::ErrorKind::AlreadyExists
+    ));
+    assert!(std::fs::read_dir(&stage)?.next().is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn remove_rejects_an_unsafe_bundle_id_before_store_access()
+-> Result<(), Box<dyn std::error::Error>> {
+    let store = MemoryStore::default();
+    let result = remove_bundle_from_store(&store, "../escape", BundleRevision(1)).await;
+    assert!(matches!(
+        result,
+        Err(tinyskills::BundleOperationError::Authoring(_))
+    ));
+    Ok(())
+}
+
+#[tokio::test]
+async fn compiled_install_rejects_a_bundle_without_its_document() {
+    static FILES: &[BundledFile] = &[BundledFile {
+        path: "references/info.md",
+        contents: "resource",
+    }];
+    let store = MemoryStore::default();
+    let compiled = [BundledSkill {
+        dir_name: "missing-document",
+        files: FILES,
+    }];
+    let outcomes = install_compiled_in_store(&store, &compiled).await;
+    assert!(matches!(
+        outcomes.into_iter().next(),
+        Some(Err(tinyskills::BundleOperationError::InvalidCompiledBundle))
+    ));
+    assert!(store.rows.lock().map_err(poison)?.is_empty());
+}
+
+#[tokio::test]
 async fn authoring_rejects_traversal_before_writing_beyond_scratch()
 -> Result<(), Box<dyn std::error::Error>> {
     let store = MemoryStore::default();
