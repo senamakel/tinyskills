@@ -233,73 +233,169 @@ fn write_staged_bundle(dir: &Path, bundle: &UserBundle) -> std::io::Result<()> {
 fn read_staged_bundle(
     dir: &Path,
     primary: BundleDocument,
+    limits: BundleLimits,
 ) -> Result<UserBundle, BundleOperationError> {
-    let document = fs::read_to_string(dir.join(primary.file_name()))?;
-    let mut resources = Vec::new();
-    for entry in walkdir(dir)? {
-        let relative = entry.strip_prefix(dir).map_err(std::io::Error::other)?;
-        let name = relative.to_string_lossy().replace('\\', "/");
-        if name == primary.file_name() || name == crate::SKILL_MD || name == crate::WORKFLOW_MD {
-            continue;
-        }
-        resources.push(BundleFile {
-            path: name,
-            bytes: fs::read(entry)?,
-        });
-    }
-    Ok(bundle_with_exact_limits(primary, document, resources)?)
+    read_bundle_dir(dir, primary, limits)
 }
 
-fn bundle_with_exact_limits(
-    primary: BundleDocument,
-    document: String,
-    resources: Vec<BundleFile>,
-) -> Result<UserBundle, crate::BundleContentError> {
-    let file_count = resources
-        .len()
-        .checked_add(1)
-        .ok_or(crate::BundleContentError::Limit("file count"))?;
-    let mut total = document.len();
-    let mut max_file = document.len();
-    let mut max_path = primary.file_name().len();
-    for file in &resources {
+fn validate_stored_bundle(
+    bundle: &UserBundle,
+    limits: BundleLimits,
+) -> Result<UserBundle, BundleOperationError> {
+    check_file_limits(bundle.files(), limits)?;
+    let primary = bundle.primary();
+    let document = std::str::from_utf8(
+        bundle
+            .file(primary.file_name())
+            .ok_or(crate::BundleContentError::MissingDocument)?,
+    )?
+    .to_owned();
+    let resources = bundle
+        .files()
+        .iter()
+        .filter(|file| file.path != primary.file_name())
+        .cloned()
+        .collect();
+    Ok(UserBundle::new(primary, document, resources, limits)?)
+}
+
+fn check_file_limits(
+    files: &[BundleFile],
+    limits: BundleLimits,
+) -> Result<(), crate::BundleContentError> {
+    if files.len() > limits.max_files {
+        return Err(crate::BundleContentError::Limit("file count"));
+    }
+    let mut total = 0usize;
+    for file in files {
+        if file.path.len() > limits.max_path_bytes {
+            return Err(crate::BundleContentError::Limit("path bytes"));
+        }
+        if file.path.split('/').count() > limits.max_depth {
+            return Err(crate::BundleContentError::Limit("depth"));
+        }
+        if file.bytes.len() > limits.max_file_bytes {
+            return Err(crate::BundleContentError::Limit("file bytes"));
+        }
         total = total
             .checked_add(file.bytes.len())
             .ok_or(crate::BundleContentError::Limit("total bytes"))?;
-        max_file = max_file.max(file.bytes.len());
-        max_path = max_path.max(file.path.len());
+        if total > limits.max_total_bytes {
+            return Err(crate::BundleContentError::Limit("total bytes"));
+        }
     }
-    UserBundle::new(
-        primary,
-        document,
-        resources,
-        BundleLimits {
-            max_files: file_count,
-            max_file_bytes: max_file,
-            max_total_bytes: total,
-            max_path_bytes: max_path,
-        },
-    )
+    Ok(())
 }
 
-fn walkdir(root: &Path) -> std::io::Result<Vec<std::path::PathBuf>> {
+fn walk_bundle_files(
+    root: &Path,
+    limits: BundleLimits,
+) -> Result<Vec<(PathBuf, String, u64)>, BundleOperationError> {
     let mut output = Vec::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(path) = stack.pop() {
+    let mut stack = vec![(root.to_path_buf(), 0usize)];
+    let mut total_bytes = 0u64;
+    while let Some((path, parent_depth)) = stack.pop() {
         for entry in fs::read_dir(path)? {
             let entry = entry?;
             let kind = entry.file_type()?;
             if kind.is_symlink() {
-                return Err(std::io::Error::other("symlink in staged bundle"));
+                return Err(std::io::Error::other("symlink in staged bundle").into());
+            }
+            let entry_path = entry.path();
+            let relative = entry_path
+                .strip_prefix(root)
+                .map_err(std::io::Error::other)?;
+            let depth = parent_depth
+                .checked_add(1)
+                .ok_or(crate::BundleContentError::Limit("depth"))?;
+            if depth > limits.max_depth {
+                return Err(crate::BundleContentError::Limit("depth").into());
+            }
+            if relative.as_os_str().as_encoded_bytes().len() > limits.max_path_bytes {
+                return Err(crate::BundleContentError::Limit("path bytes").into());
             }
             if kind.is_dir() {
-                stack.push(entry.path());
+                stack.push((entry_path, depth));
             } else if kind.is_file() {
-                output.push(entry.path());
+                if output.len() >= limits.max_files {
+                    return Err(crate::BundleContentError::Limit("file count").into());
+                }
+                let metadata = entry.metadata()?;
+                if metadata.len() > limits.max_file_bytes as u64 {
+                    return Err(crate::BundleContentError::Limit("file bytes").into());
+                }
+                total_bytes = total_bytes
+                    .checked_add(metadata.len())
+                    .ok_or(crate::BundleContentError::Limit("total bytes"))?;
+                if total_bytes > limits.max_total_bytes as u64 {
+                    return Err(crate::BundleContentError::Limit("total bytes").into());
+                }
+                let name = relative
+                    .to_str()
+                    .ok_or(crate::BundleContentError::InvalidPath)?
+                    .replace('\\', "/");
+                output.push((entry_path, name, metadata.len()));
             }
         }
     }
     Ok(output)
+}
+
+fn read_bundle_dir(
+    root: &Path,
+    primary: BundleDocument,
+    limits: BundleLimits,
+) -> Result<UserBundle, BundleOperationError> {
+    let paths = walk_bundle_files(root, limits)?;
+    let preferred = primary.file_name();
+    let fallback = primary.other();
+    let document_path = paths
+        .iter()
+        .find(|(_, name, _)| name == preferred)
+        .or_else(|| paths.iter().find(|(_, name, _)| name == fallback))
+        .map(|(path, name, _)| (path.clone(), name.clone()))
+        .ok_or(crate::BundleContentError::MissingDocument)?;
+    let mut resources = Vec::new();
+    let mut document = None;
+    let mut total = 0usize;
+    for (path, name, size) in paths {
+        let allowed = limits.max_total_bytes.saturating_sub(total);
+        let limit = limits.max_file_bytes.min(allowed);
+        if size > limit as u64 {
+            return Err(crate::BundleContentError::Limit(if allowed < limits.max_file_bytes {
+                "total bytes"
+            } else {
+                "file bytes"
+            })
+            .into());
+        }
+        let bytes = read_bounded(&path, limit)?;
+        total = total
+            .checked_add(bytes.len())
+            .ok_or(crate::BundleContentError::Limit("total bytes"))?;
+        if path == document_path.0 {
+            document = Some(String::from_utf8(bytes).map_err(std::io::Error::other)?);
+        } else if name != preferred && name != fallback {
+            resources.push(BundleFile { path: name, bytes });
+        }
+    }
+    Ok(UserBundle::new(
+        primary,
+        document.ok_or(crate::BundleContentError::MissingDocument)?,
+        resources,
+        limits,
+    )?)
+}
+
+fn read_bounded(path: &Path, limit: usize) -> Result<Vec<u8>, BundleOperationError> {
+    let file = fs::File::open(path)?;
+    let cap = u64::try_from(limit).unwrap_or(u64::MAX).saturating_add(1);
+    let mut bytes = Vec::new();
+    file.take(cap).read_to_end(&mut bytes)?;
+    if bytes.len() > limit {
+        return Err(crate::BundleContentError::Limit("file bytes").into());
+    }
+    Ok(bytes)
 }
 
 fn find_legacy_bundle(
@@ -331,15 +427,3 @@ fn find_legacy_bundle(
     Ok(None)
 }
 
-fn copy_legacy_bundle(source: &Path, destination: &Path) -> std::io::Result<()> {
-    fs::create_dir_all(destination)?;
-    for path in walkdir(source)? {
-        let relative = path.strip_prefix(source).map_err(std::io::Error::other)?;
-        let target = destination.join(relative);
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::copy(path, target)?;
-    }
-    Ok(())
-}
