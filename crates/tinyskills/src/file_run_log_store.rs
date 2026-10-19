@@ -195,74 +195,13 @@ impl RunLogStore for FileRunLogStore {
         cursor: Option<&'a RunCursor>,
         max_bytes: usize,
     ) -> RunLogFuture<'a, RunLogPage> {
-        self.tail_with_interleave(run_id, cursor, max_bytes, Box::pin(std::future::ready(())))
-    }
-
-    fn tail_with_interleave<'a>(
-        &'a self,
-        run_id: &'a str,
-        cursor: Option<&'a RunCursor>,
-        max_bytes: usize,
-        before_read: Pin<Box<dyn Future<Output = ()> + Send + 'a>>,
-    ) -> RunLogFuture<'a, RunLogPage> {
-        Box::pin(async move {
-            Self::validate_id(run_id)?;
-            let max_bytes = max_bytes.min(MAX_RUN_LOG_TAIL_BYTES);
-            let backend = self.backend();
-            let workspace = self.workspace.clone();
-            let run_id = run_id.to_owned();
-            if let Some(cursor) = cursor {
-                cursor.validate_owner(&backend, &run_id)?;
-            }
-            let run_id_for_lookup = run_id.clone();
-            let (generation, path) = tokio::task::spawn_blocking(move || {
-                let path = exact_file_path(&workspace, &run_id_for_lookup)
-                    .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "run log not found"))?;
-                let generation = file_generation(&path)?;
-                Ok::<_, io::Error>((generation, path))
-            })
-            .await
-            .map_err(|error| RunLogError::Task(error.to_string()))?
-            .map_err(RunLogError::Io)?;
-            let (position, within) = cursor.map_or(Ok((0, 0)), |cursor| {
-                cursor.state(&backend, &run_id, &generation)
-            })?;
-            if within != 0 {
-                return Err(RunLogError::InvalidCursor);
-            }
-            before_read.await;
-            let backend_for_task = backend.clone();
-            let slice = tokio::task::spawn_blocking(move || {
-                if position > std::fs::metadata(&path)?.len() {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "cursor is past end of run log",
-                    ));
-                }
-                let mut slice = run_log::read_run_log_slice(&path, position, max_bytes)?;
-                if let Some(summary) = read_file_summary(&path)? {
-                    slice.complete = summary.complete;
-                }
-                Ok::<_, io::Error>(slice)
-            })
-            .await
-            .map_err(|error| RunLogError::Task(error.to_string()))
-            .and_then(|result| {
-                result.map_err(|error| {
-                    if error.kind() == io::ErrorKind::InvalidInput {
-                        RunLogError::InvalidCursor
-                    } else {
-                        RunLogError::Io(error)
-                    }
-                })
-            })?;
-            Ok(RunLogPage {
-                content: slice.content,
-                cursor: RunCursor::new(&backend_for_task, &run_id, &generation, slice.offset, 0)?,
-                eof: slice.eof,
-                complete: slice.complete,
-            })
-        })
+        tail_with_interleave(
+            self,
+            run_id,
+            cursor,
+            max_bytes,
+            Box::pin(std::future::ready(())),
+        )
     }
 
     fn list<'a>(
@@ -318,6 +257,73 @@ impl RunLogStore for FileRunLogStore {
             Ok(existed)
         })
     }
+}
+
+fn tail_with_interleave<'a>(
+    store: &'a FileRunLogStore,
+    run_id: &'a str,
+    cursor: Option<&'a RunCursor>,
+    max_bytes: usize,
+    before_read: Pin<Box<dyn Future<Output = ()> + Send + 'a>>,
+) -> RunLogFuture<'a, RunLogPage> {
+    Box::pin(async move {
+        FileRunLogStore::validate_id(run_id)?;
+        let max_bytes = max_bytes.min(MAX_RUN_LOG_TAIL_BYTES);
+        let backend = store.backend();
+        let workspace = store.workspace.clone();
+        let run_id = run_id.to_owned();
+        if let Some(cursor) = cursor {
+            cursor.validate_owner(&backend, &run_id)?;
+        }
+        let run_id_for_lookup = run_id.clone();
+        let (generation, path) = tokio::task::spawn_blocking(move || {
+            let path = exact_file_path(&workspace, &run_id_for_lookup)
+                .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "run log not found"))?;
+            let generation = file_generation(&path)?;
+            Ok::<_, io::Error>((generation, path))
+        })
+        .await
+        .map_err(|error| RunLogError::Task(error.to_string()))?
+        .map_err(RunLogError::Io)?;
+        let (position, within) = cursor.map_or(Ok((0, 0)), |cursor| {
+            cursor.state(&backend, &run_id, &generation)
+        })?;
+        if within != 0 {
+            return Err(RunLogError::InvalidCursor);
+        }
+        before_read.await;
+        let backend_for_task = backend.clone();
+        let slice = tokio::task::spawn_blocking(move || {
+            if position > std::fs::metadata(&path)?.len() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "cursor is past end of run log",
+                ));
+            }
+            let mut slice = run_log::read_run_log_slice(&path, position, max_bytes)?;
+            if let Some(summary) = read_file_summary(&path)? {
+                slice.complete = summary.complete;
+            }
+            Ok::<_, io::Error>(slice)
+        })
+        .await
+        .map_err(|error| RunLogError::Task(error.to_string()))
+        .and_then(|result| {
+            result.map_err(|error| {
+                if error.kind() == io::ErrorKind::InvalidInput {
+                    RunLogError::InvalidCursor
+                } else {
+                    RunLogError::Io(error)
+                }
+            })
+        })?;
+        Ok(RunLogPage {
+            content: slice.content,
+            cursor: RunCursor::new(&backend_for_task, &run_id, &generation, slice.offset, 0)?,
+            eof: slice.eof,
+            complete: slice.complete,
+        })
+    })
 }
 
 fn exact_file_path(workspace: &std::path::Path, run_id: &str) -> Option<PathBuf> {
