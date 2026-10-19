@@ -137,9 +137,7 @@ impl RunLogStore for FileRunLogStore {
                 if let Err(error) =
                     write_file_summary(&path_for_task, &summary, &summary_generation, observed_len)
                 {
-                    let _ = std::fs::remove_file(summary_path(&path_for_task));
-                    let _ = std::fs::remove_file(generation_path(&path_for_task));
-                    let _ = std::fs::remove_file(&path_for_task);
+                    cleanup_failed_start(&path_for_task, &summary_generation);
                     return Err(error);
                 }
                 Ok(())
@@ -505,6 +503,12 @@ pub(crate) fn file_generation(path: &Path) -> io::Result<String> {
 
 fn generation_path(path: &Path) -> PathBuf {
     path.with_extension("generation")
+}
+
+fn cleanup_failed_start(path: &Path, _generation: &str) {
+    let _ = std::fs::remove_file(summary_path(path));
+    let _ = std::fs::remove_file(generation_path(path));
+    let _ = std::fs::remove_file(path);
 }
 
 pub(crate) fn new_generation() -> String {

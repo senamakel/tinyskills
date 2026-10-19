@@ -130,3 +130,56 @@ async fn summary_write_keeps_the_length_that_was_parsed() {
     assert_eq!(cached.run.status, "DONE");
     assert!(cached.complete);
 }
+
+#[tokio::test]
+async fn append_uses_the_cached_summary_without_reparsing_the_log() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let store = FileRunLogStore::new(temp.path());
+    let run = RunLogStart {
+        workflow_id: "workflow-a",
+        run_id: "run-incremental-summary",
+        started: "2026-01-01T00:00:00Z",
+        inputs: &INPUTS,
+        task_prompt: "prompt",
+    };
+    store.start(run).await.unwrap();
+    let log_path = exact_file_path(temp.path(), "run-incremental-summary").unwrap();
+    let parses_before_append = run_log::full_file_summary_parse_count(&log_path);
+
+    store
+        .append("run-incremental-summary", "step one")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        run_log::full_file_summary_parse_count(&log_path),
+        parses_before_append,
+        "appending to a log with a current summary cache should not parse its full history"
+    );
+}
+
+#[tokio::test]
+async fn failed_start_cleanup_preserves_a_replacement_run() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let first_handle = FileRunLogStore::new(temp.path());
+    let second_handle = FileRunLogStore::new(temp.path());
+    let original = start();
+    let path = file_store_path(temp.path(), original.workflow_id, original.run_id, "");
+    first_handle.start(original.clone()).await.unwrap();
+    let failed_generation = file_generation(&path).unwrap();
+
+    assert!(first_handle.clear(original.run_id).await.unwrap());
+    second_handle
+        .start(RunLogStart {
+            started: "2026-01-01T00:00:01Z",
+            ..original
+        })
+        .await
+        .unwrap();
+
+    cleanup_failed_start(&path, &failed_generation);
+
+    assert!(path.exists(), "cleanup must keep the replacement log");
+    assert_ne!(file_generation(&path).unwrap(), failed_generation);
+    assert!(read_file_summary(&path).unwrap().is_some());
+}

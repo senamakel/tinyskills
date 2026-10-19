@@ -3,12 +3,19 @@
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 
+#[cfg(test)]
+use std::{collections::HashMap, path::PathBuf, sync::Mutex};
+
 use serde::{Deserialize, Serialize};
 
 use super::ScannedRun;
 
 const RESULT_MARKER: &str = "--- result ---";
 const MAX_RUN_LOG_IDENTITY_BYTES: u64 = 16 * 1024;
+
+#[cfg(test)]
+static FULL_FILE_SUMMARY_PARSE_COUNTS: std::sync::LazyLock<Mutex<HashMap<PathBuf, usize>>> =
+    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Bounded-memory summary parsed from a run log.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +34,13 @@ pub struct RunLogSummary {
 ///
 /// Returns an error when the log cannot be opened or read.
 pub fn read_run_log_summary(path: &Path) -> std::io::Result<Option<RunLogSummary>> {
+    #[cfg(test)]
+    {
+        let mut counts = FULL_FILE_SUMMARY_PARSE_COUNTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *counts.entry(path.to_path_buf()).or_default() += 1;
+    }
     const CHUNK_SIZE: usize = 8192;
     const MAX_LINE_SIZE: usize = 8192;
     let mut reader = BufReader::new(std::fs::File::open(path)?);
@@ -60,6 +74,16 @@ pub fn read_run_log_summary(path: &Path) -> std::io::Result<Option<RunLogSummary
         }
     }
     Ok(fields.finish(&path.to_string_lossy()))
+}
+
+#[cfg(test)]
+pub(crate) fn full_file_summary_parse_count(path: &Path) -> usize {
+    FULL_FILE_SUMMARY_PARSE_COUNTS
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(path)
+        .copied()
+        .unwrap_or_default()
 }
 
 /// Read the workflow and run ids from the bounded prefix containing the log header.
