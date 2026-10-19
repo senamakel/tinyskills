@@ -112,7 +112,7 @@ impl BundleStore for MemoryStore {
     }
 }
 
-fn poison(
+pub fn poison(
     _: std::sync::PoisonError<std::sync::MutexGuard<'_, BTreeMap<String, StoredBundle>>>,
 ) -> BundleStoreError {
     BundleStoreError::Backend(Box::new(std::io::Error::other("test lock poisoned")))

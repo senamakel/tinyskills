@@ -4,11 +4,11 @@
 mod support;
 
 use std::sync::atomic::Ordering;
-use support::{MemoryStore, TestResultExt, content};
+use support::{MemoryStore, TestResultExt, content, poison};
 use tinyskills::{
-    BundleDocument, BundleLimits, BundleRevision, BundleSpec, BundledFile, BundledSkill,
-    install_compiled_in_store, install_document_in_store, remove_bundle_from_store,
-    scaffold_bundle_in_store,
+    BundleDocument, BundleLimits, BundleRevision, BundleSpec, BundleStore, BundleStoreError,
+    BundledFile, BundledSkill, UserBundle, install_compiled_in_store, install_document_in_store,
+    remove_bundle_from_store, scaffold_bundle_in_store,
 };
 
 #[tokio::test]
