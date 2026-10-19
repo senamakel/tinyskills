@@ -401,7 +401,7 @@ impl RunLogStore for StreamRunLogStore {
             {
                 return Err(RunLogError::Backend("run stream metadata mismatch".into()));
             }
-            let (mut offset, mut within) = cursor.map_or(Ok((header_offset + 1, 0)), |cursor| {
+            let (offset, within) = cursor.map_or(Ok((header_offset + 1, 0)), |cursor| {
                 cursor_state(cursor, &backend, run_id, &generation)
             })?;
             if offset < header_offset + 1
