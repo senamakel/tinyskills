@@ -317,7 +317,9 @@ fn find_legacy_bundle(
                     "legacy bundle is not a real directory",
                 ));
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                continue;
+            }
             Err(error) => return Err(error),
         }
     }
