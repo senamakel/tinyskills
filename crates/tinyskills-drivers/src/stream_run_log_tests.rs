@@ -504,6 +504,34 @@ async fn stream_rejects_cursor_positions_outside_the_run() {
             Err(RunLogError::InvalidCursor)
         ));
     }
+
+    state.position = store
+        .streams
+        .len(&StreamRunLogStore::stream_name("run-cursor-bounds").unwrap())
+        .await
+        .unwrap()
+        - 1;
+    state.within = 1;
+    let forged = RunCursor::from_opaque(encode_cursor(&state).unwrap());
+    assert!(matches!(
+        store.tail("run-cursor-bounds", Some(&forged), 8).await,
+        Err(RunLogError::InvalidCursor)
+    ));
+}
+
+#[tokio::test]
+async fn stream_listing_ignores_names_outside_the_encoded_run_id_format() {
+    let store = store("tenant-a");
+    store
+        .streams
+        .append(
+            &format!("{RUN_LOG_PREFIX}/not-hex"),
+            serde_json::json!({"kind":"text"}),
+        )
+        .await
+        .unwrap();
+
+    assert!(store.list(None, 10).await.unwrap().is_empty());
 }
 
 #[tokio::test]
