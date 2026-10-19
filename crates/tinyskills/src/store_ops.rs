@@ -316,9 +316,20 @@ fn walk_bundle_files(
     let mut output = Vec::new();
     let mut stack = vec![(root.to_path_buf(), 0usize)];
     let mut total_bytes = 0u64;
+    // A useful tree can contain at most `max_files` leaves at `max_depth`;
+    // bound directories too so empty-directory trees cannot grow the stack
+    // or keep the traversal busy without consuming the file budget.
+    let max_entries = limits.max_files.saturating_mul(limits.max_depth);
+    let mut visited_entries = 0usize;
     while let Some((path, parent_depth)) = stack.pop() {
         for entry in fs::read_dir(path)? {
             let entry = entry?;
+            visited_entries = visited_entries
+                .checked_add(1)
+                .ok_or(crate::BundleContentError::Limit("entry count"))?;
+            if visited_entries > max_entries {
+                return Err(crate::BundleContentError::Limit("entry count").into());
+            }
             let kind = entry.file_type()?;
             if kind.is_symlink() {
                 return Err(std::io::Error::other("symlink in staged bundle").into());

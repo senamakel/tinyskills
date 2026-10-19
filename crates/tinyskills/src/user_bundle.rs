@@ -14,7 +14,11 @@ pub struct BundleFile {
     pub bytes: Vec<u8>,
 }
 
-/// Content limits applied before a bundle becomes publishable.
+/// Content and traversal limits applied before a bundle becomes publishable.
+///
+/// Filesystem imports also cap all visited entries, including directories, at
+/// `max_files * max_depth` (saturating on arithmetic overflow). This prevents
+/// empty directories from bypassing the file-count limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BundleLimits {
     /// Maximum file count including the primary document.
