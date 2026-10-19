@@ -61,6 +61,7 @@ async fn summary_write_keeps_the_length_that_was_parsed() {
     store.start(run).await.unwrap();
     let log_path = exact_file_path(temp.path(), "run-summary-race").unwrap();
 
+    let observed_len = std::fs::metadata(&log_path).unwrap().len();
     let parsed_before_footer = run_log::read_run_log_summary(&log_path).unwrap().unwrap();
     let generation = file_generation(&log_path).unwrap();
     run_log::write_footer(
@@ -71,7 +72,7 @@ async fn summary_write_keeps_the_length_that_was_parsed() {
         "legacy result",
     )
     .unwrap();
-    write_file_summary(&log_path, &parsed_before_footer, &generation).unwrap();
+    write_file_summary(&log_path, &parsed_before_footer, &generation, observed_len).unwrap();
 
     let cached = read_file_summary(&log_path).unwrap().unwrap();
     assert_eq!(cached.run.status, "DONE");

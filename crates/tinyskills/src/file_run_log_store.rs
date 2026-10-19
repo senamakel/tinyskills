@@ -273,6 +273,14 @@ impl RunLogStore for FileRunLogStore {
 }
 
 fn exact_file_path(workspace: &std::path::Path, run_id: &str) -> Option<PathBuf> {
+    let deterministic = file_store_path(workspace, "", run_id, "");
+    if run_log::read_run_log_summary(&deterministic)
+        .ok()
+        .flatten()
+        .is_some_and(|summary| summary.run.run_id == run_id)
+    {
+        return Some(deterministic);
+    }
     let entries = std::fs::read_dir(run_log::runs_dir(workspace)).ok()?;
     let encoded_suffix = format!("_{}.log", hex(run_id.as_bytes()));
     let legacy_suffix = format!("_{}.log", run_log::sanitize(run_log::short(run_id)));
@@ -327,7 +335,9 @@ fn read_file_summary(path: &Path) -> io::Result<Option<run_log::RunLogSummary>> 
     let Some(summary) = run_log::read_run_log_summary(path)? else {
         return Ok(None);
     };
-    write_file_summary(path, &summary, &generation, observed_len)?;
+    if std::fs::metadata(path)?.len() == observed_len && file_generation(path)? == generation {
+        write_file_summary(path, &summary, &generation, observed_len)?;
+    }
     Ok(Some(summary))
 }
 
@@ -355,6 +365,7 @@ fn write_file_summary(
 
 fn update_file_summary(path: &Path, appended: &str) -> io::Result<()> {
     let observed_len = std::fs::metadata(path)?.len();
+    let generation = file_generation(path)?;
     let Some(mut summary) = read_file_summary(path)? else {
         return Ok(());
     };
@@ -383,7 +394,9 @@ fn update_file_summary(path: &Path, appended: &str) -> io::Result<()> {
             _ => {}
         }
     }
-    let generation = file_generation(path)?;
+    if std::fs::metadata(path)?.len() != observed_len || file_generation(path)? != generation {
+        return Ok(());
+    }
     write_file_summary(path, &summary, &generation, observed_len)
 }
 

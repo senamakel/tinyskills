@@ -21,6 +21,10 @@ pub struct RunLogSummary {
 }
 
 /// Parse a run summary with fixed memory usage, regardless of log history size.
+///
+/// # Errors
+///
+/// Returns an error when the log cannot be opened or read.
 pub fn read_run_log_summary(path: &Path) -> std::io::Result<Option<RunLogSummary>> {
     const CHUNK_SIZE: usize = 8192;
     const MAX_LINE_SIZE: usize = 8192;
