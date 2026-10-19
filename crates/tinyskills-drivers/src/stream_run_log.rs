@@ -187,6 +187,53 @@ impl StreamRunLogStore {
         let offset = length - 1;
         Ok(Some((offset, self.record(stream, offset).await?)))
     }
+
+    async fn page_text(
+        &self,
+        stream: &str,
+        header_offset: u64,
+        checkpoint_offset: u64,
+        mut offset: u64,
+        mut within: usize,
+        target: usize,
+    ) -> Result<(String, u64, usize), RunLogError> {
+        let mut content = String::with_capacity(target);
+        while content.len() < target && offset <= checkpoint_offset {
+            if offset == checkpoint_offset {
+                offset += 1;
+                break;
+            }
+            match self.record(stream, offset).await? {
+                StreamRecord::Header { .. } if offset == header_offset => offset += 1,
+                StreamRecord::Text { text } => {
+                    if within > text.len() || !text.is_char_boundary(within) {
+                        return Err(RunLogError::InvalidCursor);
+                    }
+                    let target_end = within
+                        .saturating_add(target - content.len())
+                        .min(text.len());
+                    let mut end = target_end;
+                    while end < text.len() && !text.is_char_boundary(end) {
+                        end += 1;
+                    }
+                    content.push_str(&text[within..end]);
+                    if end == text.len() {
+                        offset += 1;
+                        within = 0;
+                    } else {
+                        within = end;
+                    }
+                }
+                StreamRecord::Checkpoint { .. } => offset += 1,
+                StreamRecord::Header { .. } | StreamRecord::Tombstone { .. } => {
+                    return Err(RunLogError::Backend(
+                        "run stream record is malformed".into(),
+                    ));
+                }
+            }
+        }
+        Ok((content, offset, within))
+    }
 }
 
 impl RunLogStore for StreamRunLogStore {
@@ -380,47 +427,16 @@ impl RunLogStore for StreamRunLogStore {
                     complete: summary.complete,
                 });
             }
-            let target = max_bytes.max(1);
-            let mut content = String::with_capacity(target);
-            while content.len() < target && offset <= checkpoint_offset {
-                if offset == checkpoint_offset {
-                    offset += 1;
-                    break;
-                }
-                match self.record(&stream, offset).await? {
-                    StreamRecord::Header { .. } if offset == header_offset => offset += 1,
-                    StreamRecord::Text { text } => {
-                        if within > text.len() || !text.is_char_boundary(within) {
-                            return Err(RunLogError::InvalidCursor);
-                        }
-                        let target_end = within
-                            .saturating_add(target - content.len())
-                            .min(text.len());
-                        let mut end = target_end;
-                        while end < text.len() && !text.is_char_boundary(end) {
-                            end += 1;
-                        }
-                        content.push_str(&text[within..end]);
-                        if end == text.len() {
-                            offset += 1;
-                            within = 0;
-                        } else {
-                            within = end;
-                        }
-                    }
-                    StreamRecord::Checkpoint { .. } => offset += 1,
-                    StreamRecord::Header { .. } => {
-                        return Err(RunLogError::Backend(
-                            "run stream record is malformed".into(),
-                        ));
-                    }
-                    StreamRecord::Tombstone { .. } => {
-                        return Err(RunLogError::Backend(
-                            "run stream record is malformed".into(),
-                        ));
-                    }
-                }
-            }
+            let (content, offset, within) = self
+                .page_text(
+                    &stream,
+                    header_offset,
+                    checkpoint_offset,
+                    offset,
+                    within,
+                    max_bytes,
+                )
+                .await?;
             let eof = offset > checkpoint_offset && within == 0;
             Ok(RunLogPage {
                 content,
