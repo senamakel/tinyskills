@@ -130,6 +130,12 @@ impl DocumentBundleStore {
             .map(|entry| entry.path.len())
             .max()
             .unwrap_or(0);
+        let max_depth = head
+            .manifest
+            .iter()
+            .map(|entry| entry.path.split('/').count())
+            .max()
+            .unwrap_or(0);
         let mut files = Vec::with_capacity(listed.len());
         for (meta, expected) in listed.into_iter().zip(&head.manifest) {
             let blob = self
@@ -177,6 +183,7 @@ impl DocumentBundleStore {
                 max_file_bytes,
                 max_total_bytes: expected_total,
                 max_path_bytes,
+                max_depth,
             },
         )
         .map_err(|_| BundleStoreError::Corrupt)?;
