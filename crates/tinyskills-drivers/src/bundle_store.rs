@@ -158,13 +158,8 @@ impl DocumentBundleStore {
             .into_iter()
             .filter(|file| file.path != primary_file)
             .collect();
-        let content = UserBundle::new(
-            primary,
-            document,
-            resources,
-            limits,
-        )
-        .map_err(|_| BundleStoreError::Corrupt)?;
+        let content = UserBundle::new(primary, document, resources, limits)
+            .map_err(|_| BundleStoreError::Corrupt)?;
         if content.digest() != head.digest {
             return Err(BundleStoreError::Corrupt);
         }
