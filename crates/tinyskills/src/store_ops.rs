@@ -69,6 +69,12 @@ pub async fn scaffold_bundle_in_store<S: BundleStore + ?Sized>(
     }
 
     let stage = scratch_root.join(&spec.slug);
+    if fs::symlink_metadata(&stage).is_ok() {
+        return Err(BundleOperationError::Io(std::io::Error::new(
+            std::io::ErrorKind::AlreadyExists,
+            "caller-provided staging path already exists",
+        )));
+    }
     if let Some(stored) = &current {
         write_staged_bundle(&stage, &stored.content)?;
     } else if options.overwrite {
