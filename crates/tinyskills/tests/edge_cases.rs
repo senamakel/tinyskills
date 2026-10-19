@@ -19,11 +19,6 @@ static DUPLICATE_BUNDLE_FILES: &[BundledFile] = &[
     },
 ];
 
-static MATERIALIZED_FILES: &[BundledFile] = &[BundledFile {
-    path: "SKILL.md",
-    contents: "body",
-}];
-
 #[test]
 fn parsing_handles_plain_unterminated_and_invalid_yaml() -> Result<(), Box<dyn std::error::Error>> {
     let (frontmatter, body, warnings) = parse_skill_str("plain body").ok_or("plain rejected")?;
