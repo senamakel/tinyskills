@@ -47,6 +47,41 @@ async fn partial_start_log_is_preserved_until_clear_then_can_be_recreated() {
     store.start(run).await.unwrap();
 }
 
+#[test]
+fn run_identity_lookup_stops_within_the_bounded_header_prefix() {
+    let mut log = std::io::Cursor::new(format!(
+        "==== workflow_run: workflow-a ====\nrun_id : run-bounded\n{}",
+        "payload\n".repeat(1024 * 1024)
+    ));
+
+    let identity = run_log::read_run_log_header_identity_from_reader(&mut log).unwrap();
+    assert_eq!(
+        identity,
+        Some(("workflow-a".to_owned(), "run-bounded".to_owned()))
+    );
+    assert!(log.position() <= 128);
+}
+
+#[tokio::test]
+async fn clear_does_not_remove_a_deterministic_path_for_another_run() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let store = FileRunLogStore::new(temp.path());
+    let path = file_store_path(temp.path(), "workflow-a", "requested-run", "");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    run_log::write_header(
+        &path,
+        "workflow-a",
+        "different-run",
+        "2026-01-01T00:00:00Z",
+        &INPUTS,
+        "prompt",
+    )
+    .unwrap();
+
+    assert!(!store.clear("requested-run").await.unwrap());
+    assert!(path.exists());
+}
+
 #[tokio::test]
 async fn concurrent_same_id_starts_have_one_winner() {
     let temp = tempfile::TempDir::new().unwrap();

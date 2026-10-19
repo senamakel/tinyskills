@@ -265,7 +265,13 @@ impl RunLogStore for FileRunLogStore {
             let existed = tokio::task::spawn_blocking(move || {
                 let path = exact_file_path(&workspace, &run_id).or_else(|| {
                     let deterministic = file_store_path(&workspace, "", &run_id, "");
-                    deterministic.exists().then_some(deterministic)
+                    if !deterministic.exists() {
+                        return None;
+                    }
+                    match run_log::read_run_log_header_identity(&deterministic) {
+                        Ok(Some((_, stored_run_id))) if stored_run_id != run_id => None,
+                        Ok(_) | Err(_) => Some(deterministic),
+                    }
                 });
                 let Some(path) = path else {
                     return Ok::<bool, io::Error>(false);
@@ -284,10 +290,10 @@ impl RunLogStore for FileRunLogStore {
 
 fn exact_file_path(workspace: &std::path::Path, run_id: &str) -> Option<PathBuf> {
     let deterministic = file_store_path(workspace, "", run_id, "");
-    if run_log::read_run_log_summary(&deterministic)
+    if run_log::read_run_log_header_identity(&deterministic)
         .ok()
         .flatten()
-        .is_some_and(|summary| summary.run.run_id == run_id)
+        .is_some_and(|(_, stored_run_id)| stored_run_id == run_id)
     {
         return Some(deterministic);
     }
@@ -308,10 +314,10 @@ fn exact_file_path(workspace: &std::path::Path, run_id: &str) -> Option<PathBuf>
         }
     }
     legacy.into_iter().find(|path| {
-        run_log::read_run_log_summary(path)
+        run_log::read_run_log_header_identity(path)
             .ok()
             .flatten()
-            .is_some_and(|summary| summary.run.run_id == run_id)
+            .is_some_and(|(_, stored_run_id)| stored_run_id == run_id)
     })
 }
 
