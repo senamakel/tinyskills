@@ -165,6 +165,37 @@ async fn file_store_repairs_stale_summary_after_legacy_append() {
 }
 
 #[tokio::test]
+async fn file_store_finished_timestamp_without_status_is_incomplete() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let store = FileRunLogStore::new(temp.path());
+    store
+        .start(start(
+            "workflow-a",
+            "run-no-footer-status",
+            "2026-01-01T00:00:00Z",
+            "prompt",
+        ))
+        .await
+        .unwrap();
+    store
+        .append(
+            "run-no-footer-status",
+            "--- result ---\nfinished: 2026-01-01T00:00:01Z UTC\n",
+        )
+        .await
+        .unwrap();
+
+    let listed = store.list(None, 10).await.unwrap();
+    assert_eq!(listed[0].finished.as_deref(), Some("2026-01-01T00:00:01Z"));
+    assert_eq!(listed[0].status, "RUNNING");
+    let page = store
+        .tail("run-no-footer-status", None, 4096)
+        .await
+        .unwrap();
+    assert!(!page.complete);
+}
+
+#[tokio::test]
 async fn file_store_rejects_bad_ids_missing_runs_and_stale_cursors() {
     let temp = tempfile::TempDir::new().unwrap();
     let store = FileRunLogStore::new(temp.path());
