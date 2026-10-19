@@ -7,11 +7,11 @@ use std::{
 };
 
 use tinyskills::{
-    BundleDocument, BundleFuture, BundleRevision, BundleStore, BundleStoreError, BundleSummary,
-    StoredBundle, UserBundle,
+    BundleDocument, BundleFuture, BundleLimits, BundleRevision, BundleStore, BundleStoreError,
+    BundleSummary, StoredBundle, UserBundle,
 };
 
-pub trait TestResultExt<T> {
+pub(crate) trait TestResultExt<T> {
     fn into_test_result(self) -> Result<T, Box<dyn std::error::Error>>;
 }
 
@@ -28,10 +28,10 @@ impl<T> TestResultExt<T> for Option<T> {
 }
 
 #[derive(Default)]
-pub struct MemoryStore {
-    pub rows: Mutex<BTreeMap<String, StoredBundle>>,
-    pub fail_reads: AtomicBool,
-    pub fail_publishes: AtomicBool,
+pub(crate) struct MemoryStore {
+    pub(crate) rows: Mutex<BTreeMap<String, StoredBundle>>,
+    pub(crate) fail_reads: AtomicBool,
+    pub(crate) fail_publishes: AtomicBool,
 }
 
 impl BundleStore for MemoryStore {
@@ -112,16 +112,21 @@ impl BundleStore for MemoryStore {
     }
 }
 
-pub fn poison(
+pub(crate) fn poison(
     _: std::sync::PoisonError<std::sync::MutexGuard<'_, BTreeMap<String, StoredBundle>>>,
 ) -> BundleStoreError {
     BundleStoreError::Backend(Box::new(std::io::Error::other("test lock poisoned")))
 }
 
-pub fn content(
+pub(crate) fn content(
     primary: BundleDocument,
     document: &str,
     resources: Vec<tinyskills::BundleFile>,
 ) -> Result<UserBundle, tinyskills::BundleContentError> {
-    UserBundle::new(primary, document.to_owned(), resources, Default::default())
+    UserBundle::new(
+        primary,
+        document.to_owned(),
+        resources,
+        BundleLimits::default(),
+    )
 }
