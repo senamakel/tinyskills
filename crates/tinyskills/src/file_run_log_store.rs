@@ -500,4 +500,5 @@ pub(crate) fn new_generation() -> String {
 
 #[cfg(test)]
 #[path = "file_run_log_store_tests.rs"]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests;
