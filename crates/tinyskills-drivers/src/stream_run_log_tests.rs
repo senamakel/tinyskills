@@ -4,7 +4,7 @@ use super::cursor::{StreamCursorState, decode_hex, encode_cursor};
 use super::records::StreamRecord;
 use super::*;
 use serde_json::Value;
-use tinyskills::{RunLogStart, RunLogStore};
+use tinyskills::{RunCursor, RunLogStart, RunLogStore};
 use tinystoragedrivers_core::{MemoryStorage, Scope, StorageBackend, StreamEntry, StreamStore};
 
 #[path = "stream_run_log_race_tests.rs"]
@@ -493,17 +493,12 @@ async fn stream_rejects_cursor_positions_outside_the_run() {
         .await
         .unwrap();
     let initial = store.tail("run-cursor-bounds", None, 1).await.unwrap();
-    let state: StreamCursorState =
+    let mut state: StreamCursorState =
         serde_json::from_slice(&decode_hex(initial.cursor.as_opaque()).unwrap()).unwrap();
 
     for position in [0, u64::MAX] {
-        let forged = RunCursor::from_opaque(
-            encode_cursor(&StreamCursorState {
-                position,
-                ..state.clone()
-            })
-            .unwrap(),
-        );
+        state.position = position;
+        let forged = RunCursor::from_opaque(encode_cursor(&state).unwrap());
         assert!(matches!(
             store.tail("run-cursor-bounds", Some(&forged), 8).await,
             Err(RunLogError::InvalidCursor)
