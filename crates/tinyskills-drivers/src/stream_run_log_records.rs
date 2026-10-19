@@ -25,7 +25,14 @@ pub(super) enum StreamRecord {
         scope_id: String,
         run_id: String,
         generation: String,
+        header_offset: u64,
         summary: run_log::RunLogSummary,
+    },
+    Tombstone {
+        schema: u32,
+        scope_id: String,
+        run_id: String,
+        generation: String,
     },
 }
 
