@@ -4,6 +4,7 @@ use super::cursor::{StreamCursorState, decode_hex, encode_cursor};
 use super::records::StreamRecord;
 use super::*;
 use serde_json::Value;
+use tinyskills::{RunLogStart, RunLogStore};
 use tinystoragedrivers_core::{MemoryStorage, Scope, StorageBackend, StreamEntry, StreamStore};
 
 #[path = "stream_run_log_race_tests.rs"]
