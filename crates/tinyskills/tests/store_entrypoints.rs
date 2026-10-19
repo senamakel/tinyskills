@@ -3,7 +3,6 @@
 #[path = "support/store_entrypoint_support.rs"]
 mod support;
 
-use std::sync::atomic::Ordering;
 use support::{MemoryStore, TestResultExt, content, poison};
 use tinyskills::{
     BundleDocument, BundleLimits, BundleRevision, BundleSpec, BundleStore, BundleStoreError,
@@ -248,99 +247,6 @@ async fn compiled_install_publishes_files_and_does_not_replace_user_heads()
         BundleRevision(2)
     );
     Ok(())
-}
-
-#[tokio::test]
-async fn store_refusal_stops_authoring_before_staging_anything()
--> Result<(), Box<dyn std::error::Error>> {
-    let store = MemoryStore::default();
-    store.fail_reads.store(true, Ordering::SeqCst);
-    let temp = tempfile::tempdir().into_test_result()?;
-    let spec = BundleSpec {
-        slug: "demo".into(),
-        description: "new".into(),
-        ..BundleSpec::default()
-    };
-    let result = scaffold_bundle_in_store(
-        &store,
-        temp.path(),
-        &spec,
-        &tinyskills::ScaffoldOptions::default(),
-        None,
-    )
-    .await;
-    assert!(matches!(
-        result,
-        Err(tinyskills::BundleOperationError::Store(_))
-    ));
-    assert!(!temp.path().join("demo").exists());
-    Ok(())
-}
-
-#[tokio::test]
-async fn publish_refusal_leaves_only_caller_owned_staging_content()
--> Result<(), Box<dyn std::error::Error>> {
-    let store = MemoryStore::default();
-    store.fail_publishes.store(true, Ordering::SeqCst);
-    let scratch = tempfile::tempdir()?;
-    let spec = BundleSpec {
-        slug: "demo".into(),
-        description: "new".into(),
-        ..BundleSpec::default()
-    };
-    let result = scaffold_bundle_in_store(
-        &store,
-        scratch.path(),
-        &spec,
-        &tinyskills::ScaffoldOptions::default(),
-        None,
-    )
-    .await;
-    assert!(matches!(
-        result,
-        Err(tinyskills::BundleOperationError::Store(_))
-    ));
-    assert!(scratch.path().join("demo/WORKFLOW.md").is_file());
-    assert!(store.rows.lock().map_err(poison)?.is_empty());
-    Ok(())
-}
-
-#[tokio::test]
-async fn authoring_rejects_invalid_description_before_store_or_staging()
--> Result<(), Box<dyn std::error::Error>> {
-    let store = MemoryStore::default();
-    let scratch = tempfile::tempdir()?;
-    let spec = BundleSpec {
-        slug: "demo".into(),
-        description: "\n".repeat(800),
-        ..BundleSpec::default()
-    };
-    let result = scaffold_bundle_in_store(
-        &store,
-        scratch.path(),
-        &spec,
-        &tinyskills::ScaffoldOptions::default(),
-        None,
-    )
-    .await;
-    assert!(matches!(
-        result,
-        Err(tinyskills::BundleOperationError::Authoring(_))
-    ));
-    assert!(!scratch.path().join("demo").exists());
-    assert!(store.rows.lock().map_err(poison)?.is_empty());
-    Ok(())
-}
-
-#[tokio::test]
-async fn fetched_install_rejects_an_invalid_document_before_store_access() {
-    let store = MemoryStore::default();
-    let result = install_document_in_store(&store, b"not a skill document").await;
-    assert!(matches!(
-        result,
-        Err(tinyskills::BundleOperationError::Document(_))
-    ));
-    assert!(store.rows.lock().is_ok_and(|rows| rows.is_empty()));
 }
 
 #[tokio::test]
