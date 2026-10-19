@@ -411,6 +411,13 @@ async fn legacy_import_rejects_oversized_files_before_copying_them() {
             tinyskills::BundleContentError::Limit("file bytes")
         ))
     ));
+    assert!(
+        !temp
+            .path()
+            .join("scratch/demo/scripts/oversized.bin")
+            .exists(),
+        "the oversized legacy file must not be copied to scratch"
+    );
     assert!(store.read("demo").await.unwrap().is_none());
 }
 
@@ -452,6 +459,10 @@ async fn legacy_import_rejects_too_deep_trees_before_copying_them() {
             tinyskills::BundleContentError::Limit("depth")
         ))
     ));
+    assert!(
+        !temp.path().join("scratch/demo").exists(),
+        "the deep legacy tree must be rejected before any scratch copy"
+    );
     assert!(store.read("demo").await.unwrap().is_none());
 }
 
