@@ -118,11 +118,11 @@ impl RunLogStore for FileRunLogStore {
                         "run already exists",
                     ));
                 }
+                let mut file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path_for_task)?;
                 let write_result = (|| {
-                    let mut file = std::fs::OpenOptions::new()
-                        .write(true)
-                        .create_new(true)
-                        .open(&path_for_task)?;
                     file.write_all(header.as_bytes())?;
                     file.write_all(b"\n")?;
                     file.flush()
@@ -131,7 +131,9 @@ impl RunLogStore for FileRunLogStore {
                     let _ = std::fs::remove_file(&path_for_task);
                     return Err(error);
                 }
-                let observed_len = header.len() as u64 + 1;
+                let observed_len = u64::try_from(header.len())
+                    .map_err(|_| io::Error::other("run log header length exceeds u64"))?
+                    + 1;
                 if let Err(error) =
                     write_file_summary(&path_for_task, &summary, &summary_generation, observed_len)
                 {
