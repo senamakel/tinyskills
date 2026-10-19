@@ -156,7 +156,13 @@ async fn fetched_install_and_remove_use_store_revisions() {
             .file("SKILL.md"),
         Some(&fetched[..])
     );
-    assert!(install_document_in_store(&store, fetched).await.is_err());
+    assert_eq!(
+        install_document_in_store(&store, fetched)
+            .await
+            .unwrap()
+            .revision,
+        installed.revision
+    );
     assert_eq!(
         remove_bundle_from_store(&store, "new-skill", installed.revision)
             .await
@@ -264,14 +270,27 @@ async fn compiled_install_publishes_files_and_does_not_replace_user_heads() {
         Some(&b"resource"[..])
     );
     let second = install_compiled_in_store(&store, &compiled).await;
+    assert_eq!(second.into_iter().next().unwrap().unwrap(), installed);
+    let newer = content(
+        BundleDocument::Skill,
+        "---\nname: builtin\ndescription: changed\n---\nuser version\n",
+        vec![],
+    );
+    store
+        .publish("builtin", Some(installed.revision), &newer)
+        .await
+        .unwrap();
+    let third = install_compiled_in_store(&store, &compiled).await;
     assert!(matches!(
-        second.into_iter().next().unwrap(),
+        third.into_iter().next().unwrap(),
         Err(tinyskills::BundleOperationError::Store(
-            BundleStoreError::Conflict { current: Some(_) }
+            BundleStoreError::Conflict {
+                current: Some(BundleRevision(2))
+            }
         ))
     ));
     assert_eq!(
         store.read("builtin").await.unwrap().unwrap().revision,
-        installed.revision
+        BundleRevision(2)
     );
 }

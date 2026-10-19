@@ -36,9 +36,6 @@ pub enum BundleOperationError {
     /// Fetched document failed validation.
     #[error(transparent)]
     Document(#[from] crate::DocumentError),
-    /// Existing store content could not be parsed for editing.
-    #[error("stored bundle document could not be parsed")]
-    InvalidStoredDocument,
     /// A compiled bundle failed validation or omitted its primary document.
     #[error("compiled bundle is invalid")]
     InvalidCompiledBundle,
@@ -62,18 +59,16 @@ pub async fn scaffold_bundle_in_store<S: BundleStore + ?Sized>(
             current: current.as_ref().map(|stored| stored.revision),
         }));
     }
-    if expected.is_some() && current.is_none() {
-        return Err(BundleOperationError::Store(BundleStoreError::Conflict {
-            current: None,
-        }));
-    }
-
     let stage = scratch_root.join(&spec.slug);
-    if fs::symlink_metadata(&stage).is_ok() {
-        return Err(BundleOperationError::Io(std::io::Error::new(
-            std::io::ErrorKind::AlreadyExists,
-            "caller-provided staging path already exists",
-        )));
+    match fs::symlink_metadata(&stage) {
+        Ok(_) => {
+            return Err(BundleOperationError::Io(std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "caller-provided staging path already exists",
+            )));
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
     }
     if let Some(stored) = &current {
         write_staged_bundle(&stage, &stored.content)?;
@@ -110,6 +105,18 @@ pub async fn install_document_in_store<S: BundleStore + ?Sized>(
         Vec::new(),
         BundleLimits::default(),
     )?;
+    if let Some(existing) = store.read(&fetched.slug).await? {
+        if existing.content.digest() == content.digest() {
+            return Ok(PublishedBundle {
+                id: fetched.slug,
+                revision: existing.revision,
+                digest: content.digest(),
+            });
+        }
+        return Err(BundleOperationError::Store(BundleStoreError::Conflict {
+            current: Some(existing.revision),
+        }));
+    }
     let revision = store.publish(&fetched.slug, None, &content).await?;
     Ok(PublishedBundle {
         id: fetched.slug,
@@ -152,6 +159,13 @@ pub async fn install_compiled_in_store<S: BundleStore + ?Sized>(
                 .collect();
             let content = UserBundle::new(primary, document, resources, BundleLimits::default())?;
             if let Some(existing) = store.read(bundle.dir_name).await? {
+                if existing.content.digest() == content.digest() {
+                    return Ok(PublishedBundle {
+                        id: bundle.dir_name.to_owned(),
+                        revision: existing.revision,
+                        digest: content.digest(),
+                    });
+                }
                 return Err(BundleOperationError::Store(BundleStoreError::Conflict {
                     current: Some(existing.revision),
                 }));
