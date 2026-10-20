@@ -32,7 +32,7 @@ tar = { version = "0.4", default-features = false }
 flate2 = "1"
 # Skill search ranking (BM25). Pinned by rev so a host
 # that links tinytools through its own patch table resolves one package.
-tinytools = { version = "0.5", git = "https://github.com/tinyhumansai/tinytools", rev = "1cd9e9c4a117336e6f42d0c7936ed60e7476d88f", default-features = false }
+tinytools = { version = "0.6", git = "https://github.com/tinyhumansai/tinytools", rev = "1ec3468f6602b69b955a0e94105ed63abb5aa98c", default-features = false }
 # The storage ports only (no database client), by git tag so a host that vendors
 # tinystoragedrivers once can `[patch]` it. Used by the `storage-drivers` feature.
 tinystoragedrivers-core = { git = "https://github.com/tinyhumansai/tinystoragedrivers", tag = "v1.0.0" }
