@@ -981,18 +981,28 @@ dependencies = [
 
 [[package]]
 name = "tinystoragedrivers-core"
-version = "1.0.0"
-source = "git+https://github.com/tinyhumansai/tinystoragedrivers?tag=v1.0.0#141fd9ed0ad5d14a8fb5a1b3e837a719e81ac08d"
+version = "1.10.0"
+source = "git+https://github.com/tinyhumansai/tinystoragedrivers?rev=078d2dee0f299d97dbc22fa7210bd64098a4bf59#078d2dee0f299d97dbc22fa7210bd64098a4bf59"
 dependencies = [
  "async-trait",
  "data-encoding",
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "thiserror",
+ "tinystoragedrivers-schema",
  "tokio",
  "ulid",
  "zstd",
+]
+
+[[package]]
+name = "tinystoragedrivers-schema"
+version = "1.10.0"
+source = "git+https://github.com/tinyhumansai/tinystoragedrivers?rev=078d2dee0f299d97dbc22fa7210bd64098a4bf59#078d2dee0f299d97dbc22fa7210bd64098a4bf59"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]
