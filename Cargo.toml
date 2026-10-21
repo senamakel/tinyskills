@@ -33,9 +33,9 @@ flate2 = "1"
 # Skill search ranking (BM25). Pinned by rev so a host
 # that links tinytools through its own patch table resolves one package.
 tinytools = { version = "0.5", git = "https://github.com/tinyhumansai/tinytools", rev = "1cd9e9c4a117336e6f42d0c7936ed60e7476d88f", default-features = false }
-# The storage ports only (no database client), by git tag so a host that vendors
-# tinystoragedrivers once can `[patch]` it. Used by the `storage-drivers` feature.
-tinystoragedrivers-core = { git = "https://github.com/tinyhumansai/tinystoragedrivers", tag = "v1.0.0" }
+# The storage ports only (no database client), pinned to the exact TSD 1.10
+# source vendored by hosts. Used by the `storage-drivers` feature.
+tinystoragedrivers-core = { version = "=1.10.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "078d2dee0f299d97dbc22fa7210bd64098a4bf59" }
 
 # Lints apply to every member that opts in with `[lints] workspace = true`, and
 # to every target of that member. CI runs clippy with `-D warnings`, so anything
