@@ -103,11 +103,12 @@ impl StreamRunLogStore {
             .await
     }
 
-    /// Scan stored runs, sorted newest first after filtering.
+    /// Scan stored runs, sorted newest first after filtering. A stream that
+    /// does not decode as text is left out (and left in storage), so one
+    /// foreign entry cannot hide every other run.
     ///
     /// # Errors
-    /// Returns a storage or corruption error if a stream cannot be listed or
-    /// decoded.
+    /// Returns a storage error if a stream cannot be listed or read.
     pub async fn scan(
         &self,
         workflow_id: Option<&str>,
@@ -117,7 +118,11 @@ impl StreamRunLogStore {
         names.sort();
         let mut entries = Vec::with_capacity(names.len());
         for name in names {
-            entries.push((name.clone(), self.read_text(&name).await?));
+            match self.read_text(&name).await {
+                Ok(text) => entries.push((name, text)),
+                Err(RunLogStoreError::Corrupt) => {}
+                Err(error) => return Err(error),
+            }
         }
         Ok(parse_runs(entries, workflow_id, limit))
     }
@@ -125,8 +130,7 @@ impl StreamRunLogStore {
     /// Find a stored log by its full run id.
     ///
     /// # Errors
-    /// Returns a storage or corruption error if a stored stream cannot be
-    /// listed or decoded.
+    /// Returns a storage error if a stored stream cannot be listed or read.
     pub async fn find(&self, run_id: &str) -> Result<Option<String>, RunLogStoreError> {
         if run_id.is_empty() {
             return Ok(None);
