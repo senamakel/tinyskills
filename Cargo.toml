@@ -32,11 +32,11 @@ tar = { version = "0.4", default-features = false }
 flate2 = "1"
 # Skill search ranking (BM25). Pinned by rev so a host
 # that links tinytools through its own patch table resolves one package.
-tinytools = { version = "0.6", git = "https://github.com/tinyhumansai/tinytools", rev = "3a01641f8ebd8a55656cd212f9a90638d958a447", default-features = false }
+tinytools = { version = "0.6", git = "https://github.com/tinyhumansai/tinytools", rev = "41cc80ac9acf37a14f20be94f60ee552749f1540", default-features = false }
 # Storage contracts only; engines are provided by each embedding host.
-tinystoragedrivers-api = { version = "2.1.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "05eaada962decbab33bafa4763d2bd1a67f6b456" }
-tinystoragedrivers-types = { version = "2.1.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "05eaada962decbab33bafa4763d2bd1a67f6b456" }
-tinystoragedrivers-testkit = { version = "2.1.0", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "05eaada962decbab33bafa4763d2bd1a67f6b456" }
+tinystoragedrivers-api = { version = "2.1.1", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "bf1f0a97fbe6165a6edd9521659c7f6859700761" }
+tinystoragedrivers-types = { version = "2.1.1", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "bf1f0a97fbe6165a6edd9521659c7f6859700761" }
+tinystoragedrivers-testkit = { version = "2.1.1", git = "https://github.com/tinyhumansai/tinystoragedrivers", rev = "bf1f0a97fbe6165a6edd9521659c7f6859700761" }
 
 # Lints apply to every member that opts in with `[lints] workspace = true`, and
 # to every target of that member. CI runs clippy with `-D warnings`, so anything
