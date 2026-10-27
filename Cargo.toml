@@ -32,7 +32,7 @@ tar = { version = "0.4", default-features = false }
 flate2 = "1"
 # Skill search ranking (BM25). Pinned by rev so a host
 # that links tinytools through its own patch table resolves one package.
-tinytools = { version = "0.5", git = "https://github.com/tinyhumansai/tinytools", rev = "1cd9e9c4a117336e6f42d0c7936ed60e7476d88f", default-features = false }
+tinytools = { version = "0.5", git = "https://github.com/senamakel/tinytools", rev = "1cd9e9c4a117336e6f42d0c7936ed60e7476d88f", default-features = false }
 # Storage contracts only; engines are provided by each embedding host.
 tinystoragedrivers-api = { git = "https://github.com/senamakel/tinystoragedrivers", tag = "v2.0.2" }
 tinystoragedrivers-types = { git = "https://github.com/senamakel/tinystoragedrivers", tag = "v2.0.2" }
