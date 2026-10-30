@@ -11,7 +11,7 @@ WORKFLOW = Path(__file__).resolve().parents[2] / "workflows/release.yml"
 KNOWN_FAILURE = '''error: failed to prepare local package for uploading
 
 Caused by:
-  failed to select a version for the requirement `tinytools = "^0.5"`
+  failed to select a version for the requirement `tinytools = "^0.6"`
   candidate versions found which didn't match: 1.1.2, 1.1.1, 1.1.0, ...
   location searched: crates.io index
   required by package `tinyskills v0.5.0 (/checkout/crates/tinyskills)`
@@ -70,7 +70,7 @@ class ReleasePackagingTests(unittest.TestCase):
             "error: invalid package metadata",
             "error: missing packaged file",
             "error: failed to verify package: tinytools failed to compile",
-            KNOWN_FAILURE.replace('tinytools = "^0.5"', 'serde = "^99"'),
+            KNOWN_FAILURE.replace('tinytools = "^0.6"', 'serde = "^99"'),
             KNOWN_FAILURE.replace("location searched: crates.io index", "location searched: other registry"),
         ):
             with self.subTest(output=output):

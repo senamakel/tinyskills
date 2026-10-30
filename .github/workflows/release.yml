@@ -74,7 +74,7 @@ jobs:
             package_status=$?
             printf '%s\n' "$package_output" >&2
             if grep -Fxq 'error: failed to prepare local package for uploading' <<< "$package_output" \
-              && grep -Fxq '  failed to select a version for the requirement `tinytools = "^0.5"`' <<< "$package_output" \
+              && grep -Fxq '  failed to select a version for the requirement `tinytools = "^0.6"`' <<< "$package_output" \
               && grep -Fxq '  location searched: crates.io index' <<< "$package_output"; then
               gh release create "v$next" --generate-notes --title "v$next"
             else

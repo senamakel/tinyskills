@@ -190,3 +190,41 @@ async fn stream_run_logs_page_large_runs_and_preserve_multibyte_byte_offsets_aft
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn one_non_text_run_stream_does_not_hide_every_other_run() {
+    let storage = memory_storage(&Scope::new("alice").unwrap());
+    let owner = crate::SkillsStorage::open(storage.clone()).await.unwrap();
+    let store = owner.run_logs();
+    let stream = store
+        .start(
+            "demo",
+            "good-run",
+            "20261023T000000Z",
+            "2026-10-23T00:00:00+00:00",
+            &serde_json::json!({}),
+            "p",
+        )
+        .await
+        .unwrap();
+    let bad = "skills.runs.other.20261023T000001Z.bad";
+    storage
+        .streams()
+        .append(bad, serde_json::json!(1))
+        .await
+        .unwrap();
+
+    let runs = store.scan(None, 10).await.unwrap();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].run_id, "good-run");
+    assert_eq!(store.find("good-run").await.unwrap(), Some(stream));
+    // Left out of the listing, not removed.
+    assert!(
+        storage
+            .streams()
+            .streams("skills.runs.")
+            .await
+            .unwrap()
+            .contains(&bad.to_owned())
+    );
+}

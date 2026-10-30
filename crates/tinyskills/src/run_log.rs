@@ -45,7 +45,9 @@ pub fn truncate(s: &str, n: usize) -> String {
     }
 }
 
-/// Format the original human-readable run header as UTF-8 text.
+/// Format the original human-readable run header as UTF-8 text. Prompt lines
+/// are indented two spaces so no prompt line can pass for a header field or
+/// the result marker.
 #[must_use]
 pub fn format_header(
     workflow_id: &str,
@@ -54,6 +56,11 @@ pub fn format_header(
     inputs: &Value,
     task_prompt: &str,
 ) -> String {
+    let task_prompt = task_prompt
+        .lines()
+        .map(|line| format!("  {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
     format!(
         "==== workflow_run: {workflow_id} ====\n\
          run_id : {run_id}\n\
@@ -164,8 +171,8 @@ fn parse_run(stream_id: &str, text: &str) -> Option<ScannedRun> {
         let label = label_raw.trim();
         let value = value_raw.trim();
         match (label, seen_result) {
-            ("run_id", false) => value.clone_into(&mut run_id),
-            ("started", false) => value.clone_into(&mut started),
+            ("run_id", false) if run_id.is_empty() => value.clone_into(&mut run_id),
+            ("started", false) if started.is_empty() => value.clone_into(&mut started),
             ("status", true) => value.clone_into(&mut status),
             ("duration", true) => {
                 if let Ok(value) = value.trim_end_matches(" ms").trim().parse::<u64>() {
@@ -205,8 +212,11 @@ pub struct RunOutcome {
 /// running, the footer is partial, or the supplied data is malformed.
 #[must_use]
 pub fn parse_terminal_outcome(text: &str) -> Option<RunOutcome> {
-    let idx = text.find(RESULT_MARKER)?;
-    let after = &text[idx + RESULT_MARKER.len()..];
+    let marker = format!("\n{RESULT_MARKER}\n");
+    let after = match text.strip_prefix(&marker[1..]) {
+        Some(after) => after,
+        None => &text[text.find(&marker)? + marker.len()..],
+    };
     let mut status = String::new();
     let mut saw_finished = false;
     let mut lines = after.lines();

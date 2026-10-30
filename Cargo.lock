@@ -955,7 +955,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
  "windows-sys 0.59.0",
@@ -983,7 +983,7 @@ dependencies = [
 
 [[package]]
 name = "tinyskills"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "cap-fs-ext",
  "cap-std",
@@ -1005,7 +1005,7 @@ dependencies = [
 
 [[package]]
 name = "tinyskills-drivers"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "async-trait",
  "cap-std",
@@ -1023,8 +1023,8 @@ dependencies = [
 
 [[package]]
 name = "tinystoragedrivers-api"
-version = "2.1.2"
-source = "git+https://github.com/senamakel/tinystoragedrivers?rev=2d23a6a6009fa52d1e7aa18de589bdd109a54b6a#2d23a6a6009fa52d1e7aa18de589bdd109a54b6a"
+version = "2.1.1"
+source = "git+https://github.com/tinyhumansai/tinystoragedrivers?rev=bf1f0a97fbe6165a6edd9521659c7f6859700761#bf1f0a97fbe6165a6edd9521659c7f6859700761"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1037,8 +1037,8 @@ dependencies = [
 
 [[package]]
 name = "tinystoragedrivers-blob"
-version = "2.1.2"
-source = "git+https://github.com/senamakel/tinystoragedrivers?rev=2d23a6a6009fa52d1e7aa18de589bdd109a54b6a#2d23a6a6009fa52d1e7aa18de589bdd109a54b6a"
+version = "2.1.1"
+source = "git+https://github.com/tinyhumansai/tinystoragedrivers?rev=bf1f0a97fbe6165a6edd9521659c7f6859700761#bf1f0a97fbe6165a6edd9521659c7f6859700761"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1051,8 +1051,8 @@ dependencies = [
 
 [[package]]
 name = "tinystoragedrivers-connect"
-version = "2.1.2"
-source = "git+https://github.com/senamakel/tinystoragedrivers?rev=2d23a6a6009fa52d1e7aa18de589bdd109a54b6a#2d23a6a6009fa52d1e7aa18de589bdd109a54b6a"
+version = "2.1.1"
+source = "git+https://github.com/tinyhumansai/tinystoragedrivers?rev=bf1f0a97fbe6165a6edd9521659c7f6859700761#bf1f0a97fbe6165a6edd9521659c7f6859700761"
 dependencies = [
  "rusqlite",
  "serde_json",
@@ -1063,8 +1063,8 @@ dependencies = [
 
 [[package]]
 name = "tinystoragedrivers-document"
-version = "2.1.2"
-source = "git+https://github.com/senamakel/tinystoragedrivers?rev=2d23a6a6009fa52d1e7aa18de589bdd109a54b6a#2d23a6a6009fa52d1e7aa18de589bdd109a54b6a"
+version = "2.1.1"
+source = "git+https://github.com/tinyhumansai/tinystoragedrivers?rev=bf1f0a97fbe6165a6edd9521659c7f6859700761#bf1f0a97fbe6165a6edd9521659c7f6859700761"
 dependencies = [
  "async-trait",
  "data-encoding",
@@ -1081,8 +1081,8 @@ dependencies = [
 
 [[package]]
 name = "tinystoragedrivers-kv"
-version = "2.1.2"
-source = "git+https://github.com/senamakel/tinystoragedrivers?rev=2d23a6a6009fa52d1e7aa18de589bdd109a54b6a#2d23a6a6009fa52d1e7aa18de589bdd109a54b6a"
+version = "2.1.1"
+source = "git+https://github.com/tinyhumansai/tinystoragedrivers?rev=bf1f0a97fbe6165a6edd9521659c7f6859700761#bf1f0a97fbe6165a6edd9521659c7f6859700761"
 dependencies = [
  "async-trait",
  "serde",
@@ -1093,8 +1093,8 @@ dependencies = [
 
 [[package]]
 name = "tinystoragedrivers-queue"
-version = "2.1.2"
-source = "git+https://github.com/senamakel/tinystoragedrivers?rev=2d23a6a6009fa52d1e7aa18de589bdd109a54b6a#2d23a6a6009fa52d1e7aa18de589bdd109a54b6a"
+version = "2.1.1"
+source = "git+https://github.com/tinyhumansai/tinystoragedrivers?rev=bf1f0a97fbe6165a6edd9521659c7f6859700761#bf1f0a97fbe6165a6edd9521659c7f6859700761"
 dependencies = [
  "async-trait",
  "data-encoding",
@@ -1109,8 +1109,8 @@ dependencies = [
 
 [[package]]
 name = "tinystoragedrivers-secrets"
-version = "2.1.2"
-source = "git+https://github.com/senamakel/tinystoragedrivers?rev=2d23a6a6009fa52d1e7aa18de589bdd109a54b6a#2d23a6a6009fa52d1e7aa18de589bdd109a54b6a"
+version = "2.1.1"
+source = "git+https://github.com/tinyhumansai/tinystoragedrivers?rev=bf1f0a97fbe6165a6edd9521659c7f6859700761#bf1f0a97fbe6165a6edd9521659c7f6859700761"
 dependencies = [
  "async-trait",
  "tinystoragedrivers-api",
@@ -1120,8 +1120,8 @@ dependencies = [
 
 [[package]]
 name = "tinystoragedrivers-testkit"
-version = "2.1.2"
-source = "git+https://github.com/senamakel/tinystoragedrivers?rev=2d23a6a6009fa52d1e7aa18de589bdd109a54b6a#2d23a6a6009fa52d1e7aa18de589bdd109a54b6a"
+version = "2.1.1"
+source = "git+https://github.com/tinyhumansai/tinystoragedrivers?rev=bf1f0a97fbe6165a6edd9521659c7f6859700761#bf1f0a97fbe6165a6edd9521659c7f6859700761"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1141,8 +1141,8 @@ dependencies = [
 
 [[package]]
 name = "tinystoragedrivers-types"
-version = "2.1.2"
-source = "git+https://github.com/senamakel/tinystoragedrivers?rev=2d23a6a6009fa52d1e7aa18de589bdd109a54b6a#2d23a6a6009fa52d1e7aa18de589bdd109a54b6a"
+version = "2.1.1"
+source = "git+https://github.com/tinyhumansai/tinystoragedrivers?rev=bf1f0a97fbe6165a6edd9521659c7f6859700761#bf1f0a97fbe6165a6edd9521659c7f6859700761"
 dependencies = [
  "serde",
  "serde_json",
@@ -1161,8 +1161,8 @@ dependencies = [
 
 [[package]]
 name = "tinytools"
-version = "0.5.0"
-source = "git+https://github.com/senamakel/tinytools?rev=1cd9e9c4a117336e6f42d0c7936ed60e7476d88f#1cd9e9c4a117336e6f42d0c7936ed60e7476d88f"
+version = "0.6.0"
+source = "git+https://github.com/tinyhumansai/tinytools?rev=41cc80ac9acf37a14f20be94f60ee552749f1540#41cc80ac9acf37a14f20be94f60ee552749f1540"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1198,9 +1198,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.9.12+spec-1.1.0"
+version = "1.1.8+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf92845e79fc2e2def6a5d828f0801e29a2f8acc037becc5ab08595c7d5e9863"
+checksum = "20489e00e4d8741d6be680764cc12e270655e375a20d1011e844a9c3379e678d"
 dependencies = [
  "indexmap",
  "serde_core",
@@ -1208,14 +1208,14 @@ dependencies = [
  "toml_datetime",
  "toml_parser",
  "toml_writer",
- "winnow 0.7.15",
+ "winnow",
 ]
 
 [[package]]
 name = "toml_datetime"
-version = "0.7.5+spec-1.1.0"
+version = "1.1.2+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92e1cfed4a3038bc5a127e35a2d360f145e1f4b971b551a2ba5fd7aedf7e1347"
+checksum = "2b86d767906c6c42421dcba507eb9d203e779497710a47782a224bb871653053"
 dependencies = [
  "serde_core",
 ]
@@ -1226,7 +1226,7 @@ version = "1.1.5+spec-1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baa693a8032d7e1cada7d0041e96126df243179ff061456783ac7f12bda4744c"
 dependencies = [
- "winnow 1.0.4",
+ "winnow",
 ]
 
 [[package]]
@@ -1453,12 +1453,6 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 
 [[package]]
 name = "winnow"
-version = "0.7.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df79d97927682d2fd8adb29682d1140b343be4ac0f08fd68b7765d9c059d3945"
-
-[[package]]
-name = "winnow"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b97319f7b8343df12cc98938e5c3eb436064524c8d2b4e30a1d3a36eecdf81"
@@ -1629,18 +1623,18 @@ dependencies = [
 
 [[package]]
 name = "zstd"
-version = "0.14.3"
+version = "0.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db3ae9bf90af6e40197bef767eeefc46ad6397420fe873830bd85e5fbbfb3c70"
+checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
 dependencies = [
  "zstd-safe",
 ]
 
 [[package]]
 name = "zstd-safe"
-version = "8.2.0"
+version = "7.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ded520f16b29e1a9b771c722221b2b0a0398c2316d9bb3c42b458a5414d7434b"
+checksum = "64d80649ab6db9d9f6f9c80a40becd948eda4714a0a5ac8c4d157a32231c7882"
 dependencies = [
  "zstd-sys",
 ]

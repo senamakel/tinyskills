@@ -52,6 +52,6 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # `tinyskills-drivers` (never published) takes the storage ports from the
 # tinystoragedrivers repository by tag.
 allow-git = [
-  "https://github.com/senamakel/tinystoragedrivers",
-  "https://github.com/senamakel/tinytools",
+  "https://github.com/tinyhumansai/tinystoragedrivers",
+  "https://github.com/tinyhumansai/tinytools",
 ]
